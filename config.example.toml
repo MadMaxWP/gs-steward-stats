@@ -1,0 +1,20 @@
+# chmod u=rw,go= config.toml
+# generate with: python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
+secret_key = "paste-a-long-random-string-here"
+consumer_key = "the 'consumer token' from your OAuth consumer registration"
+consumer_secret = "the 'secret token' from your OAuth consumer registration"
+oauth_mwuri = "https://meta.wikimedia.org/w/index.php"
+
+session_cookie_secure = true
+db_name = "gs_actions"                       # tool database suffix: <user>__<db_name>_p
+db_host = "tools.db.svc.wikimedia.cloud"
+config_page = "User:DreamRimmer_bot/GlobalSysopStats/user-config.json"
+wikiset_name = "Opted-out of global sysop wikis"
+stream_url = "https://stream.wikimedia.org/v2/stream/recentchange"
+user_agent = "GlobalSysopActions (https://meta.wikimedia.org/wiki/User:Max; madmax.wp@proton.me)"
+
+maintainer = "Max"                           # shown in the footer and links
+cdn = "https://tools-static.wmflabs.org/cdnjs/ajax/libs"
+vue_version = "3.5.44"
+codex_version = "2.7.0"
+logo_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/5/57/Meta-Wiki_Global_sysop-2000px.png/120px-Meta-Wiki_Global_sysop-2000px.png"

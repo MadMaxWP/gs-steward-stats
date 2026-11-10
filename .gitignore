@@ -1,0 +1,13 @@
+# Secrets
+config.toml
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Toolforge logs
+uwsgi.log
+error.log
+*.log

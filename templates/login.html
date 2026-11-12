@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Log in - #gs-steward-stats</title>
+<link rel="icon" href="{{ assets.logo }}">
+<link rel="stylesheet" href="{{ assets.tokens }}">
+<link rel="stylesheet" href="{{ assets.dark }}" id="gs-dark" media="not all">
+<script>
+try { if (localStorage.getItem('gs-theme') === 'dark') { document.documentElement.dataset.theme = 'dark'; document.getElementById('gs-dark').media = 'all'; } } catch (e) {}
+// drop cached api answers from the last session, and remember where to go after logging in
+try {
+  for (var k of Object.keys(sessionStorage)) if (k.startsWith('gs-c:')) sessionStorage.removeItem(k);
+  if (location.hash && location.hash !== '#/') sessionStorage.setItem('gs-after-login', location.hash);
+} catch (e) {}
+</script>
+<link rel="stylesheet" href="{{ assets.codex_css }}">
+<link rel="stylesheet" href="css/login.css?v={{ v }}">
+<script type="importmap">
+{"imports": {"vue": {{ assets.vue|tojson }}, "@wikimedia/codex": {{ assets.codex|tojson }}, "@wikimedia/codex-icons": {{ assets.icons|tojson }}}}
+</script>
+</head>
+<body>
+<div id="app" data-logo="{{ assets.logo }}" data-login-url="{{ login_url }}" data-enabled="{{ 'yes' if login_enabled else 'no' }}"></div>
+<script type="module" src="js/login.js?v={{ v }}"></script>
+</body>
+</html>

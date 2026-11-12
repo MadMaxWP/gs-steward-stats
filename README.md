@@ -1,6 +1,3 @@
-# #gs-steward-stats
+# gs-steward-stats
 
-A Toolforge web tool that lists administrative actions by current stewards
-and global sysops on global sysop (GS) projects: deletions, blocks,
-protections, merges, imports, AbuseFilter changes, and more. It also has a
-live feed of these actions as they happen.
+A small Toolforge tool that shows what current stewards and global sysops have been doing on global sysop (GS) wikis: deletions, blocks, protections, history merges, imports, AbuseFilter changes and the like. There's also a live feed, so you can watch new actions come in as they happen.

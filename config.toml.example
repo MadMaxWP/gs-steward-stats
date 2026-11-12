@@ -1,0 +1,8 @@
+# copy to config.toml
+
+# any long random string, e.g. from: python3 -c "import secrets; print(secrets.token_hex(32))"
+secret_key = ""
+
+# from your oauth consumer on meta (Special:OAuthConsumerRegistration)
+consumer_key = ""
+consumer_secret = ""

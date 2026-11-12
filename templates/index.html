@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#gs-steward-stats</title>
+<link rel="icon" href="{{ assets.logo }}">
+<link rel="stylesheet" href="{{ assets.tokens }}">
+<link rel="stylesheet" href="{{ assets.dark }}" id="gs-dark" media="not all">
+<script>
+// apply the saved theme before anything paints
+try { if (localStorage.getItem('gs-theme') === 'dark') { document.documentElement.dataset.theme = 'dark'; document.getElementById('gs-dark').media = 'all'; } } catch (e) {}
+</script>
+<link rel="stylesheet" href="{{ assets.codex_css }}">
+<link rel="stylesheet" href="css/app.css?v={{ v }}">
+<script type="importmap">
+{"imports": {"vue": {{ assets.vue|tojson }}, "@wikimedia/codex": {{ assets.codex|tojson }}, "@wikimedia/codex-icons": {{ assets.icons|tojson }}}}
+</script>
+</head>
+<body>
+<div id="app" data-logo="{{ assets.logo }}">
+  <div class="boot"><div class="cdx-progress-indicator"><div class="cdx-progress-indicator__indicator"><progress class="cdx-progress-indicator__indicator__progress" aria-label="Loading"></progress></div></div></div>
+</div>
+<script type="module" src="js/main.js?v={{ v }}"></script>
+<script>
+// if vue or codex never loads (cdn down, old browser) say so instead of a blank page
+setTimeout(function () {
+  var el = document.getElementById('app');
+  if (el && !el.hasAttribute('data-v-app')) el.querySelector('.boot').textContent = 'The page could not be loaded. Please reload, or try another browser.';
+}, 15000);
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 // small building blocks used on most pages
 import { computed } from 'vue';
-import { CdxButton, CdxCard, CdxIcon, CdxInfoChip, CdxMessage, CdxSelect, CdxTextInput } from '../codex.js';
+import { CdxButton, CdxCard, CdxIcon, CdxMessage, CdxSelect, CdxTextInput } from '../codex.js';
 import { icons } from '../codex.js';
 import { ago, daysAgo, fmtTs, today } from '../format.js';
 import { isPinned, store, tick, togglePin } from '../store.js';
@@ -11,11 +11,16 @@ export const StatCard = {
   template: `<cdx-card class="stat" :class="'tone-' + tone" :icon="icon"><template #title>{{ value }}</template><template #description>{{ label }}</template><template v-if="hint" #supporting-text>{{ hint }}</template></cdx-card>`
 };
 
-// codex info chip, registered as <gs-tag> because it's used everywhere
+// thin outlined tag for activity, current/past, gs/non-gs etc, registered as <gs-tag>
 export const GsTag = {
   props: { status: { type: String, default: 'notice' } },
-  components: { CdxInfoChip },
-  template: `<cdx-info-chip :status="status"><slot/></cdx-info-chip>`
+  template: `<span class="gs-tag" :class="'is-' + status"><slot/></span>`
+};
+
+// steward in blue, global sysop in plain grey, square like the other tags
+export const RoleTag = {
+  props: { role: { type: String, default: '' } },
+  template: `<span class="role-tag" :class="role === 'steward' ? 'is-steward' : 'is-gs'">{{ role === 'steward' ? 'Steward' : 'Global sysop' }}</span>`
 };
 
 // newest of the two sync times the backfill script writes

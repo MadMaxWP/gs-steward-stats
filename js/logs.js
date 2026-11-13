@@ -26,7 +26,6 @@ export const catOf = r => {
 };
 
 export const roleName = r => (r === 'steward' ? 'Steward' : 'Global sysop');
-export const roleChip = r => (r === 'steward' ? 'progressive' : 'notice');
 
 // icon + tone per action, falling back to per type
 const byAction = {

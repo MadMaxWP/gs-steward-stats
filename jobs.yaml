@@ -1,0 +1,6 @@
+# toolforge jobs, load with: toolforge jobs load jobs.yaml
+- name: gs-stew-update
+  command: $HOME/www/python/venv/bin/python $HOME/www/python/src/backfill.py update
+  image: python3.13
+  schedule: "0 */3 * * *"
+  emails: onfailure

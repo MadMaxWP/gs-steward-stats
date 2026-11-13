@@ -4,7 +4,7 @@ import { api } from './api.js';
 import { CdxButton, CdxIcon, CdxInfoChip, CdxProgressIndicator, CdxTooltip, icons } from './codex.js';
 import { lsSet } from './format.js';
 import { navCount, route, store } from './store.js';
-import { GsTag, StaleBanner, SyncNote } from './components/common.js';
+import { GsTag, RoleTag, StaleBanner, SyncNote } from './components/common.js';
 import { AboutPage } from './pages/about.js';
 import { ExplorerPage } from './pages/explorer.js';
 import { HomePage } from './pages/home.js';
@@ -104,6 +104,7 @@ const App = {
 
 const app = createApp(App);
 app.component('GsTag', GsTag);
+app.component('RoleTag', RoleTag);
 app.component('SyncNote', SyncNote);
 app.component('CdxInfoChip', CdxInfoChip);
 app.component('CdxProgressIndicator', CdxProgressIndicator);

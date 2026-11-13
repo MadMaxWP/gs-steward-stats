@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, apiUrl } from '../api.js';
 import { CdxButton, CdxCard, CdxField, CdxIcon, CdxLookup, CdxMessage, CdxSelect, CdxTable, CdxTextInput, CdxToggleButtonGroup, icons } from '../codex.js';
 import { fmtDay, fmtTime, fmtTs, lsGet, lsSet, num } from '../format.js';
-import { actionCats, actionLabel, commentParts, paramText, permalink, roleChip, roleName, sentence, targetLink, toneOf } from '../logs.js';
+import { actionCats, actionLabel, commentParts, paramText, permalink, roleName, sentence, targetLink, toneOf } from '../logs.js';
 import { setQuery, store } from '../store.js';
 import { Pager } from './common.js';
 
@@ -41,7 +41,7 @@ export const ActionList = {
     });
     const key = r => r.key || (r.wiki + ':' + r.log_id);
     const comment = r => commentParts(r.comment, r.domain || 'meta.wikimedia.org');
-    return { cols, days, key, comment, fmtTs, fmtTime, permalink, targetLink, actionLabel, paramText, toneOf, roleName, roleChip, icons };
+    return { cols, days, key, comment, fmtTs, fmtTime, permalink, targetLink, actionLabel, paramText, toneOf, roleName, icons };
   },
   template: `
 <div>
@@ -53,7 +53,7 @@ export const ActionList = {
     <log-sentence :a="r" :with-user="showUser"/>
     <span class="tags">
       <cdx-info-chip status="subtle" class="wtag">{{ r.wiki }}</cdx-info-chip>
-      <gs-tag v-if="showUser && r.role" :status="roleChip(r.role)">{{ roleName(r.role) }}</gs-tag>
+      <role-tag v-if="showUser && r.role" :role="r.role"/>
       <gs-tag v-if="r.locked" status="warning">Closed/Locked project</gs-tag>
       <a class="perma" :href="permalink(r)" target="_blank" rel="noopener" aria-label="Open log entry" v-tooltip="'Open log entry'"><cdx-icon :icon="icons.ext" size="small"/></a>
     </span>
@@ -61,7 +61,7 @@ export const ActionList = {
 </ul>
 <cdx-table v-else-if="mode === 'table'" caption="Actions" hide-caption :columns="cols" :data="rows">
   <template #item-ts="{ row }"><span class="nw">{{ fmtTs(row.ts) }}</span></template>
-  <template #item-actor="{ row }"><span class="nw"><a :href="'#/user/' + encodeURIComponent(row.actor)">{{ row.actor }}</a> <gs-tag v-if="row.role" :status="roleChip(row.role)">{{ roleName(row.role) }}</gs-tag></span></template>
+  <template #item-actor="{ row }"><span class="nw"><a :href="'#/user/' + encodeURIComponent(row.actor)">{{ row.actor }}</a> <role-tag v-if="row.role" :role="row.role"/></span></template>
   <template #item-wiki="{ row }"><span class="nw"><a class="mono" :href="'#/project/' + encodeURIComponent(row.wiki)">{{ row.wiki }}</a> <gs-tag v-if="row.locked" status="warning">Closed/Locked</gs-tag></span></template>
   <template #item-action="{ row }"><span class="nw"><span class="ico" :class="'t-' + toneOf(row).tone"><cdx-icon :icon="toneOf(row).icon" size="small"/></span> {{ actionLabel(row) }}</span></template>
   <template #item-title="{ row }"><a :href="targetLink(row)" target="_blank" rel="noopener">{{ row.title }}</a></template>
@@ -77,7 +77,7 @@ export const ActionList = {
       <span v-if="paramText(r)" class="lc-params">{{ paramText(r) }}</span>
       <span class="lc-tags">
         <cdx-info-chip status="subtle" class="wtag">{{ r.wiki }}</cdx-info-chip>
-        <gs-tag v-if="showUser && r.role" :status="roleChip(r.role)">{{ roleName(r.role) }}</gs-tag>
+        <role-tag v-if="showUser && r.role" :role="r.role"/>
         <gs-tag v-if="r.locked" status="warning">Closed/Locked project</gs-tag>
         <a class="perma" :href="permalink(r)" target="_blank" rel="noopener" aria-label="Open log entry" v-tooltip="'Open log entry'"><cdx-icon :icon="icons.ext" size="small"/></a>
       </span>
@@ -94,7 +94,7 @@ export const ActionList = {
         <log-sentence :a="r" :with-user="showUser"/>
         <span class="tags">
           <cdx-info-chip status="subtle" class="wtag">{{ r.wiki }}</cdx-info-chip>
-          <gs-tag v-if="showUser && r.role" :status="roleChip(r.role)">{{ roleName(r.role) }}</gs-tag>
+          <role-tag v-if="showUser && r.role" :role="r.role"/>
           <gs-tag v-if="r.locked" status="warning">Closed/Locked project</gs-tag>
         </span>
       </div>

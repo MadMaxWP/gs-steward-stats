@@ -21,4 +21,5 @@ main { flex: 1; display: flex; align-items: center; justify-content: center; pad
 .hero .cdx-message { text-align: left; }
 .footer { margin-top: auto; border-top: 1px solid var(--border-color-subtle, #c8ccd1); background: var(--background-color-base, #fff); padding: 24px 16px calc(24px + env(safe-area-inset-bottom, 0px)); text-align: center; color: var(--color-subtle, #54595d); font-size: .875rem; line-height: 1.6; }
 .footer p { margin: 0; }
+.mono { font-family: var(--font-family-monospace, monospace); font-size: .8125rem; }
 @media (max-width: 600px) { .hero h1 { font-size: 1.75rem; } .hero img { width: 88px; height: 88px; } .hero .cdx-button { width: 100%; min-width: 0; } }

@@ -15,7 +15,7 @@ sync, backfill, prune, update and all finish with the summary step on their own,
 so the web pages pick up the new numbers straight away.
 
 on toolforge it runs from the built image, e.g. a one off job:
-  toolforge jobs run --image tool-gs-steward-stats/tool-gs-steward-stats:latest \
+  toolforge jobs run --image tool-gs-steward-stats/web:latest \
       --command "backfill summary" --wait gs-summary
 """
 import argparse

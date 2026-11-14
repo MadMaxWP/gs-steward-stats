@@ -71,7 +71,7 @@ export const LivePage = {
   },
   template: `
 <div>
-  <div class="pagehead"><h1>Live feed</h1><p class="sub">Actions by stewards and global sysops as they happen, including steward only logs and steward request page edits on Meta. The last day of events is kept, so you see recent actions as soon as you open this page.</p></div>
+  <div class="pagehead"><h1>Live feed</h1><p class="sub">Actions by stewards and global sysops as they happen, including steward only logs and steward request page edits on Meta.</p></div>
   <cdx-message v-if="err" type="error">{{ err }}</cdx-message>
   <cdx-message v-else-if="status && !status.connected" type="warning" inline>Connecting to the Wikimedia event stream.</cdx-message>
   <cdx-message v-else-if="status && !status.context_ok" type="warning" inline>Connected, but the list of stewards, global sysops or GS projects could not be loaded yet, so some actions may be missed. Retrying every minute.</cdx-message>

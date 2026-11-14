@@ -53,8 +53,8 @@ export function alertFor(found) {
   const title = found.length === 1 ? actionLabel(a) + ' by ' + a.actor : found.length + ' new actions';
   const body = found.length === 1 ? a.wiki + ': ' + a.title : found.map(x => actionLabel(x) + ' by ' + x.actor).slice(0, 4).join('\n');
   // looking at the tool: a notice in the page that goes away by itself.
-  // tab in the background: a browser notification, if the browser allows it
-  if (!document.hidden) {
+  // another tab or another app: a browser notification, if the browser allows it
+  if (!document.hidden && document.hasFocus()) {
     // the codex toast takes focus when it opens, give it back so typing isn't interrupted
     const was = document.activeElement;
     toast.value = { id: ++toastId, text: title + ' · ' + body.split('\n')[0] };

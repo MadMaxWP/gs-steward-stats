@@ -22,6 +22,7 @@ export const LivePage = {
     // alerts fire for new actions that match the filters above, on any page of the tool
     const alerts = ref(lsJson('gs-live-alerts', { sound: false, notify: false }));
     const permission = ref(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
+    const askPermission = async () => { try { permission.value = await Notification.requestPermission(); } catch (e) {} };
     watch(alerts, v => lsSet('gs-live-alerts', JSON.stringify(v)), { deep: true });
     watch(() => alerts.value.sound, on => {
       // browsers only allow audio after a click, and ticking the box is one
@@ -29,8 +30,7 @@ export const LivePage = {
     });
     watch(() => alerts.value.notify, async on => {
       // the notice inside the page always works, the browser one only if it's allowed
-      if (!on || permission.value !== 'default') return;
-      permission.value = await Notification.requestPermission();
+      if (on && permission.value === 'default') await askPermission();
     });
     if (alerts.value.sound) startAudio();
 
@@ -67,7 +67,7 @@ export const LivePage = {
     const lastHour = computed(() => items.value.filter(i => Date.now() - new Date(i.ts).getTime() < 3600000).length);
     const lastEvent = computed(() => (status.value && status.value.last_event_ms ? ago(new Date(status.value.last_event_ms).toISOString()) : 'not yet'));
     const clear = () => { items.value = []; };
-    return { items, status, err, paused, mode, role, cat, q, alerts, permission, catItems, roleItems, modeItems, filtered, lastHour, lastEvent, clear, icons };
+    return { items, status, err, paused, mode, role, cat, q, alerts, permission, askPermission, catItems, roleItems, modeItems, filtered, lastHour, lastEvent, clear, icons };
   },
   template: `
 <div>
@@ -85,7 +85,9 @@ export const LivePage = {
         <template #label>Alerts for new actions matching these filters, on any page of this tool</template>
         <cdx-checkbox v-model="alerts.sound" :inline="true">Play a sound</cdx-checkbox>
         <cdx-checkbox v-model="alerts.notify" :inline="true">Show a notification</cdx-checkbox>
-        <template v-if="alerts.notify && (permission === 'denied' || permission === 'unsupported')" #help-text>Notifications show inside the tool only, your browser blocks them for this site.</template>
+        <template v-if="alerts.notify && permission === 'default'" #help-text>Your browser hasn't been asked yet, so you'll only see them while looking at the tool. <a href="#" @click.prevent="askPermission">Allow browser notifications</a></template>
+        <template v-else-if="alerts.notify && permission === 'denied'" #help-text>Your browser blocks notifications for this site, so you'll only see them while looking at the tool. To change that, allow notifications in the site settings (the icon left of the address).</template>
+        <template v-else-if="alerts.notify && permission === 'unsupported'" #help-text>This browser can't show notifications, so you'll only see them while looking at the tool.</template>
       </cdx-field>
     </div>
     <div class="toolbar">

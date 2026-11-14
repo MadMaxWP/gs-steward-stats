@@ -2,65 +2,37 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api } from '../api.js';
 import { CdxButton, CdxCheckbox, CdxField, CdxIcon, CdxMessage, CdxSelect, CdxTextInput, CdxToggleButtonGroup, icons } from '../codex.js';
 import { ago, lsGet, lsJson, lsSet } from '../format.js';
-import { actionLabel, catOf, liveCats } from '../logs.js';
+import { liveCats } from '../logs.js';
 import { ActionList, modeItems } from '../components/actions.js';
-
-let audio = null;
-function chime() {
-  if (!audio) return;
-  const t = audio.currentTime;
-  [880, 1320].forEach((hz, i) => {
-    const o = audio.createOscillator(), g = audio.createGain();
-    o.frequency.value = hz;
-    g.gain.setValueAtTime(0.0001, t + i * 0.15);
-    g.gain.exponentialRampToValueAtTime(0.15, t + i * 0.15 + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.15 + 0.3);
-    o.connect(g).connect(audio.destination);
-    o.start(t + i * 0.15);
-    o.stop(t + i * 0.15 + 0.32);
-  });
-}
+import { alertFor, chime, liveFilters, markSeen, matchesFilters, startAudio } from '../livewatch.js';
 
 export const LivePage = {
   components: { ActionList, CdxSelect, CdxTextInput, CdxToggleButtonGroup, CdxButton, CdxCheckbox, CdxIcon, CdxMessage, CdxField },
   setup() {
     const items = ref([]), status = ref(null), err = ref('');
-    const paused = ref(false), mode = ref(lsGet('gs-live-mode', 'log')), role = ref('all'), cat = ref('all'), q = ref('');
+    // filters are remembered so alerts on other pages follow them too
+    const f0 = liveFilters();
+    const paused = ref(false), mode = ref(lsGet('gs-live-mode', 'log')), role = ref(f0.role), cat = ref(f0.cat), q = ref(f0.q);
+    watch([role, cat, q], () => lsSet('gs-live-filters', JSON.stringify({ role: role.value, cat: cat.value, q: q.value })));
     let since = 0, timer = null;
     const seen = new Set();
 
-    const matches = i => (role.value === 'all' || i.role === role.value) && (cat.value === 'all' || catOf(i) === cat.value)
-      && (!q.value || (i.actor + ' ' + i.wiki + ' ' + i.domain + ' ' + i.title + ' ' + (i.comment || '')).toLowerCase().includes(q.value.toLowerCase()));
+    const matches = i => matchesFilters(i, { role: role.value, cat: cat.value, q: q.value });
 
-    // alerts fire for new actions that match the filters above
+    // alerts fire for new actions that match the filters above, on any page of the tool
     const alerts = ref(lsJson('gs-live-alerts', { sound: false, notify: false }));
     const permission = ref(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
     watch(alerts, v => lsSet('gs-live-alerts', JSON.stringify(v)), { deep: true });
     watch(() => alerts.value.sound, on => {
       // browsers only allow audio after a click, and ticking the box is one
-      if (on && !audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
-      if (on) chime();
+      if (on) { startAudio(); chime(); }
     });
     watch(() => alerts.value.notify, async on => {
-      if (!on || permission.value === 'unsupported') return;
-      if (permission.value === 'default') permission.value = await Notification.requestPermission();
-      if (permission.value !== 'granted') alerts.value.notify = false;
+      // the notice inside the page always works, the browser one only if it's allowed
+      if (!on || permission.value !== 'default') return;
+      permission.value = await Notification.requestPermission();
     });
-    if (alerts.value.sound) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
-
-    function alert(found) {
-      if (!found.length) return;
-      if (alerts.value.sound) chime();
-      if (alerts.value.notify && permission.value === 'granted') {
-        const a = found[0];
-        const title = found.length === 1 ? actionLabel(a) + ' by ' + a.actor : found.length + ' new actions';
-        const body = found.length === 1 ? a.wiki + ': ' + a.title : found.map(x => actionLabel(x) + ' by ' + x.actor).slice(0, 4).join('\n');
-        try {
-          const n = new Notification(title, { body, tag: 'gs-live' });
-          n.onclick = () => { window.focus(); n.close(); };
-        } catch (e) {}
-      }
-    }
+    if (alerts.value.sound) startAudio();
 
     async function poll() {
       try {
@@ -80,12 +52,13 @@ export const LivePage = {
           if (items.value.length > 500) items.value.length = 500;
         }
         // the first answer is history, only later ones can alert
-        alert(fresh.filter(matches));
+        alertFor(fresh.filter(matches));
+        markSeen();
         since = Math.max(0, d.now - 20000);
       } catch (e) { err.value = e.message; }
     }
-    onMounted(() => { poll(); timer = setInterval(poll, 4000); });
-    onBeforeUnmount(() => clearInterval(timer));
+    onMounted(() => { markSeen(); poll(); timer = setInterval(poll, 4000); });
+    onBeforeUnmount(() => { clearInterval(timer); markSeen(); });
     watch(mode, v => lsSet('gs-live-mode', v));
 
     const catItems = [{ value: 'all', label: 'All actions' }, ...liveCats];
@@ -109,11 +82,10 @@ export const LivePage = {
       <cdx-field><template #label>Role</template><cdx-select v-model:selected="role" :menu-items="roleItems"/></cdx-field>
       <cdx-field><template #label>Action</template><cdx-select v-model:selected="cat" :menu-items="catItems"/></cdx-field>
       <cdx-field :is-fieldset="true" class="wide">
-        <template #label>Alerts for new actions matching these filters</template>
+        <template #label>Alerts for new actions matching these filters, on any page of this tool</template>
         <cdx-checkbox v-model="alerts.sound" :inline="true">Play a sound</cdx-checkbox>
-        <cdx-checkbox v-model="alerts.notify" :inline="true" :disabled="permission === 'unsupported' || permission === 'denied'">Show a browser notification</cdx-checkbox>
-        <template v-if="permission === 'denied'" #help-text>Notifications are blocked for this site in your browser settings.</template>
-        <template v-else-if="permission === 'unsupported'" #help-text>This browser does not support notifications.</template>
+        <cdx-checkbox v-model="alerts.notify" :inline="true">Show a notification</cdx-checkbox>
+        <template v-if="alerts.notify && (permission === 'denied' || permission === 'unsupported')" #help-text>Notifications show inside the tool only, your browser blocks them for this site.</template>
       </cdx-field>
     </div>
     <div class="toolbar">

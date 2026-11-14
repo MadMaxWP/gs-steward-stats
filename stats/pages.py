@@ -3,7 +3,7 @@ import os
 
 from flask import Blueprint, render_template, send_from_directory, url_for
 
-from stats import settings
+from stats import settings, version as source
 from stats.auth import oauth_ready
 
 bp = Blueprint("pages", __name__)
@@ -30,7 +30,7 @@ version = asset_version()
 
 
 def page(template, **extra):
-    html = render_template(template, assets=settings.assets, v=version, **extra)
+    html = render_template(template, assets=settings.assets, v=version, source=source.source_url, commit=source.commit(), **extra)
     return html, 200, {"Cache-Control": "private, no-store"}
 
 

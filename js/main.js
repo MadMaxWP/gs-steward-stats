@@ -1,9 +1,10 @@
 // app shell: header, router and footer. pages live in ./pages
 import { computed, createApp, onMounted, ref, watch } from 'vue';
 import { api } from './api.js';
-import { CdxButton, CdxIcon, CdxInfoChip, CdxMenuButton, CdxProgressIndicator, CdxTooltip, icons } from './codex.js';
+import { CdxButton, CdxIcon, CdxInfoChip, CdxMenuButton, CdxProgressIndicator, CdxToast, CdxTooltip, icons } from './codex.js';
 import { lsSet } from './format.js';
 import { navCount, route, store } from './store.js';
+import { dropToast, startWatch, toast, unseen } from './livewatch.js';
 import { GsTag, RoleTag, StaleBanner, SyncNote } from './components/common.js';
 import { AboutPage } from './pages/about.js';
 import { ExplorerPage } from './pages/explorer.js';
@@ -37,9 +38,9 @@ async function loadMeta() {
 const dataPages = ['home', 'users', 'user', 'explorer', 'projects', 'project', 'year'];
 
 const App = {
-  components: { HomePage, UsersPage, UserPage, ExplorerPage, ProjectsPage, ProjectPage, LivePage, PeoplePage, YearPage, AboutPage, StaleBanner, CdxIcon, CdxButton, CdxMenuButton },
+  components: { HomePage, UsersPage, UserPage, ExplorerPage, ProjectsPage, ProjectPage, LivePage, PeoplePage, YearPage, AboutPage, StaleBanner, CdxIcon, CdxButton, CdxMenuButton, CdxToast },
   setup() {
-    onMounted(() => { loadMeta(); loadMe(); });
+    onMounted(() => { loadMeta(); loadMe(); startWatch(); });
     // pick up a newer sync time when moving to another page
     watch(() => route.value.name + '/' + route.value.arg, () => loadMeta());
     watch(() => route.value.name, n => { if (!['user', 'project'].includes(n)) document.title = '#gs-steward-stats'; });
@@ -80,13 +81,14 @@ const App = {
       else if (v === 'logout') location.href = 'logout';
       acctSel.value = null;
     }
-    return { route, navCount, nav, current, showStale, myPage, store, theme, toggleTheme, icons, logo, source, commit, acctSel, acctItems, onAcct };
+    const viewLive = () => { dropToast(); location.hash = '#/live'; };
+    return { toast, dropToast, viewLive, unseen, route, navCount, nav, current, showStale, myPage, store, theme, toggleTheme, icons, logo, source, commit, acctSel, acctItems, onAcct };
   },
   template: `
 <div class="shell">
   <header class="hdr"><div class="hdr-in">
     <a class="brand" href="#/"><img :src="logo" alt="">#gs-steward-stats</a>
-    <nav class="nav"><a v-for="n in nav" :key="n[0]" :href="'#/' + (n[0] === 'home' ? '' : n[0])" :class="{ on: current === n[0] }"><cdx-icon :icon="n[2]" size="small"/>{{ n[1] }}</a></nav>
+    <nav class="nav"><a v-for="n in nav" :key="n[0]" :href="'#/' + (n[0] === 'home' ? '' : n[0])" :class="{ on: current === n[0] }"><cdx-icon :icon="n[2]" size="small"/>{{ n[1] }}<span v-if="n[0] === 'live' && unseen && current !== 'live'" class="navcount">{{ unseen > 99 ? '99+' : unseen }}</span></a></nav>
     <div class="acct" v-if="store.me && store.me.username">
       <a v-if="myPage" class="who" :href="myPage" v-tooltip="'Your page'"><cdx-icon :icon="icons.user" size="small"/>{{ store.me.username }}</a>
       <span v-else class="who" v-tooltip="'Logged in as ' + store.me.username"><cdx-icon :icon="icons.user" size="small"/>{{ store.me.username }}</span>
@@ -95,6 +97,7 @@ const App = {
     <div class="acctmenu" v-if="store.me && store.me.username"><cdx-menu-button v-model:selected="acctSel" :menu-items="acctItems" :menu-config="{ visibleItemLimit: 0 }" aria-label="Account menu" @update:selected="onAcct"><cdx-icon :icon="icons.user"/></cdx-menu-button></div>
     <div class="themesw"><cdx-button weight="quiet" :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'" v-tooltip="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme"><cdx-icon :icon="theme === 'dark' ? icons.sun : icons.moon"/></cdx-button></div>
   </div></header>
+  <cdx-toast v-if="toast" :key="toast.id" type="subtle" standalone :auto-dismiss="6000" action-button-label="View" @action-button-click="viewLive" @user-dismissed="dropToast" @auto-dismissed="dropToast">{{ toast.text }}</cdx-toast>
   <main>
     <stale-banner v-if="showStale"/>
     <home-page v-if="route.name === 'home'" :key="'home' + navCount"/>

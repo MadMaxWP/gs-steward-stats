@@ -4,7 +4,7 @@ import * as iconSet from '@wikimedia/codex-icons';
 
 export const {
   CdxButton, CdxCard, CdxCheckbox, CdxField, CdxIcon, CdxInfoChip, CdxLookup, CdxMenuButton, CdxMessage, CdxProgressIndicator,
-  CdxSelect, CdxTab, CdxTable, CdxTabs, CdxTextInput, CdxToggleButtonGroup, CdxTooltip
+  CdxSelect, CdxTab, CdxTable, CdxTabs, CdxTextInput, CdxToast, CdxToggleButtonGroup, CdxTooltip
 } = codex;
 
 // first icon that exists, older icon packs miss a few names

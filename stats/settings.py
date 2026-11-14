@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 # shared settings for the web app and backfill.py
 
@@ -12,9 +13,11 @@ config_page = "User:DreamRimmer_bot/GlobalSysopStats/user-config.json"
 wikiset_name = "Opted-out of global sysop wikis"
 
 app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# the live feed files go here. every worker can see it, so it's
-# how they share things
-data_dir = os.environ.get("GS_DATA_DIR", app_dir)
+# the live feed files go here. every worker in the container can see it, so
+# it's how they share things. it's a short lived buffer, so plain /tmp is fine
+# and nothing needs nfs
+data_dir = os.environ.get("GS_DATA_DIR") or os.path.join(tempfile.gettempdir(), "gs-steward-stats")
+os.makedirs(data_dir, exist_ok=True)
 
 cdn = os.environ.get("GS_CDN", "https://tools-static.wmflabs.org/cdnjs/ajax/libs")
 assets = {

@@ -18,7 +18,7 @@ try { if (localStorage.getItem('gs-theme') === 'dark') { document.documentElemen
 </script>
 </head>
 <body>
-<div id="app" data-logo="{{ assets.logo }}">
+<div id="app" data-logo="{{ assets.logo }}" data-source="{{ source }}" data-commit="{{ commit }}">
   <div class="boot"><div class="cdx-progress-indicator"><div class="cdx-progress-indicator__indicator"><progress class="cdx-progress-indicator__indicator__progress" aria-label="Loading"></progress></div></div></div>
 </div>
 <script type="module" src="js/main.js?v={{ v }}"></script>

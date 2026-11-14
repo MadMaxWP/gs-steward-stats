@@ -1,3 +1,4 @@
+import hashlib
 import os
 
 from flask import Blueprint, render_template, send_from_directory, url_for
@@ -13,13 +14,16 @@ css_dir = os.path.join(settings.app_dir, "css")
 
 
 def asset_version():
-    # newest mtime in js/ and css/, so browsers pick up new files after a deploy
-    newest = 0
+    # hash of everything in js/ and css/, so browsers pick up new files after a
+    # deploy. not mtimes, the build service sets all of them to 1980
+    h = hashlib.sha1()
     for top in (js_dir, css_dir):
-        for root, _, files in os.walk(top):
-            for f in files:
-                newest = max(newest, int(os.path.getmtime(os.path.join(root, f))))
-    return str(newest)
+        for root, dirs, files in os.walk(top):
+            dirs.sort()
+            for f in sorted(files):
+                with open(os.path.join(root, f), "rb") as fh:
+                    h.update(fh.read())
+    return h.hexdigest()[:10]
 
 
 version = asset_version()

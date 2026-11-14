@@ -3,11 +3,14 @@ from flask import Blueprint, current_app, jsonify, redirect, request, session, u
 
 from stats import people
 
+# oauth login against meta. everything except the oauth endpoints needs a
+# logged in session. we only keep the username in the session cookie
+
 bp = Blueprint("auth", __name__)
 
 mw_uri = "https://meta.wikimedia.org/w/index.php"
 # the login screen needs its js and css before anyone is logged in
-public_endpoints = {"auth.login", "auth.oauth_callback", "auth.logout", "pages.js", "pages.css"}
+public_endpoints = {"auth.login", "auth.oauth_callback", "auth.logout", "pages.js", "pages.css", "healthz"}
 
 
 def oauth_ready():
@@ -27,7 +30,7 @@ def current_user():
 @bp.route("/login")
 def login():
     if not oauth_ready():
-        return current_app.response_class("Login is not configured (secret_key, consumer_key or consumer_secret missing in config.toml).", status=503, mimetype="text/plain")
+        return current_app.response_class("Login is not configured (GS_SECRET_KEY, GS_CONSUMER_KEY or GS_CONSUMER_SECRET is missing).", status=503, mimetype="text/plain")
     try:
         target, request_token = mwoauth.initiate(mw_uri, consumer())
     except Exception:

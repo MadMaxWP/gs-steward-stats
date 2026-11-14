@@ -68,8 +68,9 @@ def require_login():
     if request.endpoint in public_endpoints:
         return None
     if current_user():
-        if request.path.startswith("/api/"):
-            # any api call counts as being here, for the people page
+        # any api call counts as being here, for the people page. not the live
+        # feed checks though, those run in the background on every open tab
+        if request.path.startswith("/api/") and request.endpoint != "api.live_feed":
             try:
                 people.seen(current_user())
             except Exception:

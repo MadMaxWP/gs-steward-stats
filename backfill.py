@@ -7,12 +7,16 @@ commands (python3 backfill.py <command> --help for the options):
   backfill   read admin logs from the wiki replicas into gs_actions
   prune      drop rows that shouldn't be counted (former members, non-gs or private wikis,
              outside rights periods, while a local admin)
-  update     sync + backfill of the last few days + prune. this is the one cron runs
+  update     sync + backfill of the last few days + prune. the scheduled job in toolforge.yaml runs this
   all        init + sync + full backfill + prune, for a fresh setup
   summary    work out the overview, users and project numbers into gs_summary
 
 sync, backfill, prune, update and all finish with the summary step on their own,
 so the web pages pick up the new numbers straight away.
+
+on toolforge it runs from the built image, e.g. a one off job:
+  toolforge jobs run --image tool-gs-steward-stats/tool-gs-steward-stats:latest \
+      --command "backfill summary" --wait gs-summary
 """
 import argparse
 import json
@@ -39,6 +43,16 @@ summary_table = """
     CREATE TABLE IF NOT EXISTS gs_summary (
         k VARCHAR(80) NOT NULL PRIMARY KEY,
         v LONGTEXT NOT NULL,
+        updated_at DATETIME NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """
+
+# namespace names per wiki domain, so each wiki's api is only asked once.
+# used to be a json file in the home folder, the build service has no home folder
+namespace_table = """
+    CREATE TABLE IF NOT EXISTS gs_namespaces (
+        domain VARCHAR(255) NOT NULL PRIMARY KEY,
+        names MEDIUMTEXT NOT NULL,
         updated_at DATETIME NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """
@@ -89,6 +103,7 @@ schema = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
     summary_table,
+    namespace_table,
     people.table,
     # leftovers from older versions
     "DROP TABLE IF EXISTS gs_local_sysop",
@@ -222,23 +237,46 @@ def sync_users(conn):
 
 # ------------------------------------------------------------------ backfill
 
-ns_cache_file = os.path.expanduser("~/gs_ns_cache.json")
-_ns_cache = None
+_ns_cache = {}
+_ns_new = set()
 _ns_lock = threading.Lock()
 
 
+def load_ns(conn):
+    # everything we already know, read once before the wikis are fetched
+    with conn.cursor() as cur:
+        cur.execute(namespace_table)  # for setups made before this table existed
+        cur.execute("SELECT domain, names FROM gs_namespaces")
+        rows = cur.fetchall()
+    with _ns_lock:
+        for domain, names in rows:
+            try:
+                _ns_cache[domain] = json.loads(names)
+            except ValueError:
+                pass
+
+
+def save_ns(conn):
+    # only the domains we had to ask the api about this run
+    with _ns_lock:
+        found = [(d, json.dumps(_ns_cache[d], ensure_ascii=False)) for d in _ns_new if d in _ns_cache]
+        _ns_new.clear()
+    if not found:
+        return
+    now = now_naive().replace(microsecond=0)
+    with conn.cursor() as cur:
+        cur.executemany(
+            "REPLACE INTO gs_namespaces (domain, names, updated_at) VALUES (%s, %s, %s)",
+            [(d, names, now) for d, names in found],
+        )
+
+
 def ns_names(domain):
-    # namespace names per wiki, kept on disk so each wiki is only asked once
-    global _ns_cache
+    # worker threads call this, so it only touches memory. load_ns and
+    # save_ns do the db part
     if not domain:
         return {}
     with _ns_lock:
-        if _ns_cache is None:
-            try:
-                with open(ns_cache_file, encoding="utf-8") as fh:
-                    _ns_cache = json.load(fh)
-            except Exception:
-                _ns_cache = {}
         hit = _ns_cache.get(domain)
     if hit:
         return {int(k): v for k, v in hit.items()}
@@ -254,11 +292,7 @@ def ns_names(domain):
         return {}
     with _ns_lock:
         _ns_cache[domain] = {str(k): v for k, v in out.items()}
-        try:
-            with open(ns_cache_file, "w", encoding="utf-8") as fh:
-                json.dump(_ns_cache, fh, ensure_ascii=False)
-        except Exception:
-            pass
+        _ns_new.add(domain)
     return out
 
 
@@ -346,6 +380,7 @@ def backfill(conn, only_users=None, only_wikis=None, since=None, workers=4, resu
         firsts = [min(f for f, _ in r["groups"]) for r in rules.values() if r["groups"]]
         since = "20010101000000" if len(firsts) < len(rules) else min(firsts).strftime("%Y%m%d%H%M%S")
 
+    load_ns(conn)
     total = done = 0
     pool = ThreadPoolExecutor(max_workers=workers)
     try:
@@ -368,9 +403,11 @@ def backfill(conn, only_users=None, only_wikis=None, since=None, workers=4, resu
             print(f"[{done}/{len(wikis)}] {dbname}: {len(found)} rows (fetch {secs:.1f}s, insert {time.time() - t1:.1f}s)", flush=True)
     except KeyboardInterrupt:
         print(f"\nStopped after {done} wikis. Finished wikis are saved, carry on with: backfill --resume", flush=True)
+        save_ns(conn)
         pool.shutdown(wait=False, cancel_futures=True)
         os._exit(130)  # workers may be stuck in a db call, don't wait for them
     pool.shutdown(wait=True)
+    save_ns(conn)
     set_meta(conn, "last_backfill")
     print(f"Fetched {total} rows")
     return total

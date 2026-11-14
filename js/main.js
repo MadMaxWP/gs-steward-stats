@@ -66,8 +66,8 @@ const App = {
       lsSet('gs-theme', t);
     });
     const toggleTheme = () => { theme.value = theme.value === 'dark' ? 'light' : 'dark'; };
-    const logo = document.getElementById('app').dataset.logo;
-    return { route, navCount, nav, current, showStale, myPage, store, theme, toggleTheme, icons, logo };
+    const { logo, source, commit } = document.getElementById('app').dataset;
+    return { route, navCount, nav, current, showStale, myPage, store, theme, toggleTheme, icons, logo, source, commit };
   },
   template: `
 <div class="shell">
@@ -98,6 +98,7 @@ const App = {
   <footer class="footer">
     <p>Brought to you by <a href="https://meta.wikimedia.org/wiki/User:Max">Max</a></p>
     <p>Powered by <a href="https://wikitech.wikimedia.org/wiki/Portal:Toolforge">Toolforge</a> &middot; <a href="https://meta.wikimedia.org/wiki/User_talk:Max">Report an issue</a></p>
+    <p><a :href="source">Source</a><template v-if="commit"> (<a class="mono" :href="source + '/commit/' + commit">{{ commit.slice(0, 7) }}</a>)</template></p>
   </footer>
 </div>`
 };

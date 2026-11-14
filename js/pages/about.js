@@ -5,24 +5,42 @@ export const AboutPage = {
   setup() { return { icons }; },
   template: `
 <div>
-  <div class="pagehead"><h1>About</h1><p class="sub">What this tool shows and how the numbers are calculated.</p></div>
+  <div class="pagehead"><h1>About</h1><p class="sub">Here's a quick explanation of what this tool tracks and how the numbers work.</p></div>
   <section class="panel about">
     <h2><cdx-icon :icon="icons.info"/>What this tool shows</h2>
-    <p>This tool lists administrative actions by current stewards and global sysops on global sysop projects: deletions, undeletions, revision and log deletions, blocks, unblocks, protections, history merges, imports and AbuseFilter changes. Former members are not included.</p>
+    <p>This tool keeps track of administrative actions by current stewards and global sysops on global sysop projects. This includes deletions, undeletions, revision and log deletions, blocks, unblocks, protections, history merges, imports and AbuseFilter changes. Former stewards and global sysops aren't included.</p>
+
     <h2><cdx-icon :icon="icons.contrib"/>What gets counted</h2>
-    <p>An action is counted only if the user held the steward or global sysop right at that time. Actions on a project where the user was also a local administrator at the time are skipped. Closed/locked projects are shown separately and are not part of the main totals.</p>
+    <p>An action only counts if the user had the steward or global sysop right when they performed it. Actions on projects where they were also a local admin at the time aren't counted. Closed and locked projects are shown separately and aren't included in the main totals.</p>
+
     <h2><cdx-icon :icon="icons.userActive"/>Activity levels</h2>
-    <p>Activity is based on the date of a user's last recorded action, on active or closed/locked projects. A user is Active with an action in the last month, Moderate within the last two months, Low activity within the last six months, and Inactive with no action for six months or more. Stewards also do work that is not tracked here, such as global locks, suppression and renames, so a steward marked as inactive may still be active elsewhere.</p>
+    <p>Activity is based on when a user last performed an action recorded by this tool, including actions on closed and locked projects.</p>
+    <ul>
+      <li><b>Active:</b> At least one action in the last month.</li>
+      <li><b>Moderate:</b> No action in the last month, but one within the last two months.</li>
+      <li><b>Low activity:</b> No action in the last two months, but one within the last six months.</li>
+      <li><b>Inactive:</b> No recorded action in the last six months or longer.</li>
+    </ul>
+    <p>This doesn't cover everything stewards do. Things like global locks, suppressions and renames aren't included in these activity figures, so someone marked as inactive here may still be active in other areas.</p>
+
     <h2><cdx-icon :icon="icons.live"/>Live feed</h2>
-    <p>The live feed shows actions as they happen, including steward only logs from Meta such as rights changes, global blocks, global locks and renames, and edits by stewards on the steward request pages. It listens only while someone has the page open, and keeps the last day of events so everyone sees the same feed.</p>
+    <p>The live feed shows actions as they happen, including steward only logs from Meta such as rights changes, global blocks, global locks and renames, and edits by stewards on the steward request pages.</p>
+
     <h2><cdx-icon :icon="icons.star"/>Pinned users</h2>
-    <p>Pin users with the star button to keep them at hand on the overview and in the users list. Pins are saved in your browser only.</p>
-    <h2><cdx-icon :icon="icons.userActive"/>People</h2>
-    <p>The People page lists who has used the tool lately, online now or how long ago they were here. Only your username and roughly when you were last here are kept, rounded to the minute, and you drop off the list after 30 days away. Nothing else about your visits is stored.</p>
+    <p>You can use the star button to pin users and keep them handy. Pinned users appear on the overview and in the users list. Your pins are saved in your browser.</p>
+
+    <h2><cdx-icon :icon="icons.group"/>People</h2>
+    <p>The People page shows who has recently visited the tool, who's online and when others were last here.</p>
+    <p>Only your username and roughly when you last visited are stored, rounded to the nearest minute. You're removed from the list after 30 days without a visit.</p>
+
     <h2><cdx-icon :icon="icons.refresh"/>Where the data comes from</h2>
-    <p>History comes from the Wikimedia replica databases and the data is synced every few hours. Totals are worked out at each sync, so the numbers on the overview, users and project pages are as of the last sync. Group history and local administrator periods come from the GlobalSysopStats config on Meta.</p>
+    <p>Action history comes from the Wikimedia replica databases, is stored in the ToolsDB database and is synced every three hours.</p>
+    <p>Steward and global sysop group history, along with local admin periods, comes from the GlobalSysopStats config and the APIs.</p>
+
     <h2><cdx-icon :icon="icons.warn"/>Accuracy</h2>
-    <p>The numbers are accurate for nearly all actions, but a few may differ or be missing. Some closed/locked projects cannot be read from the replicas, suppressed log entries are hidden, and actions at the exact boundary of a rights period may be counted on either side. To verify a number, open the log entry using its link icon.</p>
+    <p>The numbers should be right for most actions, but there are a few limitations. Some closed or locked projects aren't available through the replicas, suppressed log entries can't be seen, and actions performed right around the start or end of a rights period may sometimes be counted differently.</p>
+    <p>You can check individual actions by opening the corresponding log entry using the link icon.</p>
+
     <div class="aboutbtns">
       <a class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--action-progressive cdx-button--weight-normal cdx-button--size-medium" href="https://meta.wikimedia.org/wiki/User:DreamRimmer_bot/GlobalSysopStats/user-config.json" target="_blank" rel="noopener"><cdx-icon :icon="icons.ext"/> Source config (JSON)</a>
       <a class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--action-default cdx-button--weight-normal cdx-button--size-medium" href="https://meta.wikimedia.org/wiki/User_talk:Max" target="_blank" rel="noopener"><cdx-icon :icon="icons.ext"/> Report an issue</a>

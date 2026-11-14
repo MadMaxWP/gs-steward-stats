@@ -2,6 +2,7 @@ import fcntl
 import html
 import json
 import os
+import random
 import threading
 import time
 from collections import deque
@@ -13,12 +14,14 @@ from stats import rights, settings, stewards
 from stats.logparams import normalize
 from stats.wikimedia import fetch_config, fetch_gs_wikis, fetch_members
 
-# when someone opens the feed, the worker that answers tries to grab a file lock.
-# whoever gets it listens to the wikimedia event stream and writes matching events
-# to live_feed.json in the data dir. every worker just reads that file, so all
-# viewers see the same feed, and someone who turns up later still gets the last
-# day of events. when nobody has looked at the feed for a while the listener
-# stops and lets go of the lock, so nothing runs while nobody is watching
+# every worker tries to grab a file lock when it starts. whoever gets it listens
+# to the wikimedia event stream the whole time and writes matching events to
+# live_feed.json in the data dir. every worker just reads that file, so all
+# viewers see the same feed.
+#
+# nothing is stored anywhere else. a deploy starts a fresh container, so the feed
+# starts empty again and fills up as things happen. a worker restart inside the
+# same container picks the stream up where it stopped (Last-Event-ID).
 
 stream_url = "https://stream.wikimedia.org/v2/stream/recentchange"
 meta_logs = {"rights", "gblblock", "globalauth", "gblrights", "renameuser", "gblrename"}
@@ -27,18 +30,17 @@ admin_types = {"delete", "block", "protect", "merge", "import", "abusefilter"}
 feed_file = os.path.join(settings.data_dir, "live_feed.json")
 status_file = os.path.join(settings.data_dir, "live_status.json")
 lock_file = os.path.join(settings.data_dir, "live_feed.lock")
-seen_file = os.path.join(settings.data_dir, "live_feed.seen")
 
 keep_events = 500
 keep_seconds = 24 * 3600
-idle_stop = 15 * 60       # stop listening after this long with no viewers
 resume_window = 5 * 60    # pick the stream up where we left off if we stopped this recently
 refresh_every = 30 * 60   # reload who is a steward/gs and which wikis count
 retry_every = 60          # ...or this soon if that failed
 write_every = 2
 heartbeat_every = 10
+keeper_every = 60         # each worker checks this often that someone is listening
 
-_proc = {"thread": None, "touched": 0, "feed": (None, None), "status": (None, None)}
+_proc = {"thread": None, "keeper": None, "feed": (None, None), "status": (None, None)}
 _proc_lock = threading.Lock()
 
 
@@ -75,22 +77,23 @@ def read_json(path, slot):
     return data
 
 
-def touch_seen():
-    if time.time() - _proc["touched"] < 5:
-        return
-    _proc["touched"] = time.time()
-    try:
-        with open(seen_file, "a"):
-            os.utime(seen_file, None)
-    except OSError:
-        pass
+def keeper():
+    # if the worker holding the stream dies, another one takes over within a minute
+    while True:
+        try:
+            ensure_listener()
+        except Exception:
+            pass
+        time.sleep(keeper_every)
 
 
-def seen_age():
-    try:
-        return time.time() - os.stat(seen_file).st_mtime
-    except FileNotFoundError:
-        return float("inf")
+def start():
+    # called once per worker when the app loads
+    with _proc_lock:
+        if _proc["keeper"]:
+            return
+        _proc["keeper"] = threading.Thread(target=keeper, name="live-keeper", daemon=True)
+        _proc["keeper"].start()
 
 
 def ensure_listener():
@@ -110,7 +113,6 @@ def ensure_listener():
 
 
 def feed(since):
-    touch_seen()
     ensure_listener()
     data = read_json(feed_file, "feed") or {}
     status = read_json(status_file, "status") or {}
@@ -130,14 +132,15 @@ class Listener:
             "connected": False, "started_at": iso(time.time()), "last_event_ms": 0, "total_seen": 0,
             "stewards": 0, "global_sysops": 0, "wikis": 0, "context_updated": None, "context_ok": False,
         }
-        old = self.load(feed_file)
+        # a restarted worker in the same container still has the files
+        old = {"events": self.load(feed_file).get("events", []), **{
+            k: v for k, v in self.load(status_file).items() if k in ("heartbeat", "last_id")}}
         cutoff = now_ms() - keep_seconds * 1000
         self.events = deque((e for e in old.get("events", []) if e.get("recv", 0) > cutoff), maxlen=keep_events)
         self.keys = {e["key"] for e in self.events}
-        last = self.load(status_file)
-        recent = time.time() - (last.get("heartbeat") or 0) < resume_window
-        self.last_id = last.get("last_id") if recent else None
-        self.dirty = False
+        recent = time.time() - (old.get("heartbeat") or 0) < resume_window
+        self.last_id = old.get("last_id") if recent else None
+        self.dirty = bool(self.events)  # write what we loaded so viewers see it straight away
         self.wrote = 0
         self.beat = 0
 
@@ -219,7 +222,7 @@ class Listener:
             # load the lists first so the opening seconds of the stream aren't thrown away
             ok = self.refresh()
             threading.Thread(target=self.refresher, args=(ok,), name="live-refresh", daemon=True).start()
-            while seen_age() < idle_stop:
+            while not self.stop.is_set():
                 try:
                     self.listen()
                     backoff = 1
@@ -227,7 +230,8 @@ class Listener:
                 except Exception:
                     self.status["connected"] = False
                     self.save(force=True)
-                    time.sleep(backoff)
+                    # back off with a bit of jitter, like the eventstreams docs ask
+                    time.sleep(backoff + random.random())
                     backoff = min(backoff * 2, 60)
         finally:
             self.stop.set()
@@ -248,17 +252,18 @@ class Listener:
             r.encoding = "utf-8"
             self.status["connected"] = True
             self.save(force=True)
-            checked = time.time()
+            pending = None
             for line in r.iter_lines(decode_unicode=True):
-                if time.time() - checked > heartbeat_every:
-                    checked = time.time()
-                    if seen_age() >= idle_stop:
-                        return
                 self.save()
                 if not line:
+                    # end of one event. only now move the resume point, so a cut
+                    # connection never skips an event we didn't handle yet
+                    if pending:
+                        self.last_id = pending
+                        pending = None
                     continue
                 if line.startswith("id:"):
-                    self.last_id = line[3:].strip()
+                    pending = line[3:].strip()
                     continue
                 if line.startswith("data:"):
                     try:

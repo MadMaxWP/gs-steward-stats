@@ -3,16 +3,23 @@ import tomllib
 
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from stats import api, auth, db, pages, settings, stewards
 
+# gunicorn runs `app` from here (see Procfile)
+
 app = Flask(__name__, static_folder=None, template_folder="templates")
+# toolforge's front proxy does https, so trust its forwarded headers
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
 )
 
+# on toolforge the secrets are envvars (toolforge envvars create GS_SECRET_KEY ...).
+# a config.toml next to this file still works for local runs
 config_file = os.path.join(settings.app_dir, "config.toml")
 conf = {}
 if os.path.exists(config_file):
@@ -34,6 +41,12 @@ app.register_blueprint(api.bp)
 app.register_blueprint(stewards.bp)
 
 app.before_request(auth.require_login)
+
+
+@app.route("/healthz")
+def healthz():
+    # toolforge asks this to know the web component is up
+    return "ok", 200, {"Content-Type": "text/plain", "Cache-Control": "no-store"}
 app.teardown_appcontext(db.close)
 
 
@@ -43,6 +56,7 @@ def on_error(e):
         if request.path.startswith("/api/"):
             return jsonify({"error": e.description}), e.code
         return e
+    # log the real thing, don't show sql or hostnames to people
     app.logger.exception("unhandled error on %s", request.path)
     if request.path.startswith("/api/"):
         return jsonify({"error": "Something went wrong on the server. Please try again in a moment."}), 500

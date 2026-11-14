@@ -9,6 +9,11 @@ from stats import settings
 
 
 def replica_login():
+    # toolforge gives every job and webservice these envvars. replica.my.cnf
+    # is only there when the home folder is mounted (old setups, local runs)
+    user, password = os.environ.get("TOOL_TOOLSDB_USER"), os.environ.get("TOOL_TOOLSDB_PASSWORD")
+    if user and password:
+        return user, password
     cp = configparser.ConfigParser()
     cp.read(os.path.expanduser("~/replica.my.cnf"))
     return cp["client"]["user"].strip("'\""), cp["client"]["password"].strip("'\"")

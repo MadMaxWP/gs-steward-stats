@@ -32,7 +32,7 @@ status_file = os.path.join(settings.data_dir, "live_status.json")
 lock_file = os.path.join(settings.data_dir, "live_feed.lock")
 
 keep_events = 500
-keep_seconds = 24 * 3600
+keep_seconds = 3 * 3600  # same as the sync, older actions are on the other pages by then
 resume_window = 5 * 60    # pick the stream up where we left off if we stopped this recently
 refresh_every = 30 * 60   # reload who is a steward/gs and which wikis count
 retry_every = 60          # ...or this soon if that failed

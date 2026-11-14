@@ -17,8 +17,11 @@ components:
       port: 8000
       publish: /
       health_check_http: /healthz
-      # one copy only, the live feed listener lives inside it
+      # one copy only, the live feed listener lives inside it. more speed
+      # comes from gunicorn workers inside it (Procfile), not more copies
       replicas: 1
+      cpu: "1"
+      memory: 1Gi
       mount: none
   # sync + recent backfill + summary, every 3 hours
   update:
@@ -28,5 +31,9 @@ components:
     run:
       command: update
       schedule: "0 */3 * * *"
+      cpu: "1"
+      memory: 1Gi
+      # a normal run takes minutes, stop a stuck one before the next starts
+      timeout: 9000
       mount: none
       emails: onfailure

@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from stats import api, auth, db, pages, settings, stewards
+from stats import api, auth, db, live, pages, settings, stewards
 
 # gunicorn runs `app` from here (see Procfile)
 
@@ -41,6 +41,10 @@ app.register_blueprint(api.bp)
 app.register_blueprint(stewards.bp)
 
 app.before_request(auth.require_login)
+
+
+# the live feed listens all the time, one worker holds the stream
+live.start()
 
 
 @app.route("/healthz")

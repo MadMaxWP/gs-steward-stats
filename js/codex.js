@@ -3,7 +3,7 @@ import * as codex from '@wikimedia/codex';
 import * as iconSet from '@wikimedia/codex-icons';
 
 export const {
-  CdxButton, CdxCard, CdxCheckbox, CdxField, CdxIcon, CdxInfoChip, CdxLookup, CdxMessage, CdxProgressIndicator,
+  CdxButton, CdxCard, CdxCheckbox, CdxField, CdxIcon, CdxInfoChip, CdxLookup, CdxMenuButton, CdxMessage, CdxProgressIndicator,
   CdxSelect, CdxTab, CdxTable, CdxTabs, CdxTextInput, CdxToggleButtonGroup, CdxTooltip
 } = codex;
 
@@ -23,7 +23,7 @@ export const icons = {
   list: ic('cdxIconListBullet'), table: ic('cdxIconTable'), card: ic('cdxIconArticle', 'cdxIconImage'), tl: ic('cdxIconHistory'),
   warn: ic('cdxIconAlert'), lock: ic('cdxIconLock'), calendar: ic('cdxIconCalendar'), live: ic('cdxIconLive', 'cdxIconClock'),
   contrib: ic('cdxIconUserContributions', 'cdxIconUserGroup'), userActive: ic('cdxIconUserActive', 'cdxIconUserAvatar'),
-  sun: ic('cdxIconSun', 'cdxIconLightbulb'), moon: ic('cdxIconMoon', 'cdxIconClock'), logOut: ic('cdxIconLogOut', 'cdxIconClose'),
+  sun: ic('cdxIconSun', 'cdxIconBright', 'cdxIconLightbulb'), moon: ic('cdxIconMoon', 'cdxIconClock'), logOut: ic('cdxIconLogOut', 'cdxIconClose'),
   logIn: ic('cdxIconLogIn', 'cdxIconUserAvatar'), key: ic('cdxIconKey', 'cdxIconLock'), star: ic('cdxIconStar'),
   unstar: ic('cdxIconUnStar', 'cdxIconStar'), bell: ic('cdxIconBell', 'cdxIconNotice')
 };

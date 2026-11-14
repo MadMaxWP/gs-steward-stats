@@ -1,13 +1,14 @@
-# Secrets
+# secrets and local files, never commit these
 config.toml
-
-# Python
 __pycache__/
-*.py[cod]
+*.pyc
 venv/
 .venv/
-
-# Toolforge logs
-uwsgi.log
-error.log
-*.log
+# old nfs setups wrote these next to app.py
+live_feed.json
+live_status.json
+live_feed.lock
+live_feed.seen
+auths.json
+auths.json.*
+*.tmp

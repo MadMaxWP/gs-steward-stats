@@ -23,7 +23,7 @@ try {
 </script>
 </head>
 <body>
-<div id="app" data-logo="{{ assets.logo }}" data-login-url="{{ login_url }}" data-enabled="{{ 'yes' if login_enabled else 'no' }}"></div>
+<div id="app" data-logo="{{ assets.logo }}" data-login-url="{{ login_url }}" data-enabled="{{ 'yes' if login_enabled else 'no' }}" data-source="{{ source }}" data-commit="{{ commit }}"></div>
 <script type="module" src="js/login.js?v={{ v }}"></script>
 </body>
 </html>

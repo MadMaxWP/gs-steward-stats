@@ -1,7 +1,7 @@
 // app shell: header, router and footer. pages live in ./pages
 import { computed, createApp, onMounted, ref, watch } from 'vue';
 import { api } from './api.js';
-import { CdxButton, CdxIcon, CdxInfoChip, CdxProgressIndicator, CdxTooltip, icons } from './codex.js';
+import { CdxButton, CdxIcon, CdxInfoChip, CdxMenuButton, CdxProgressIndicator, CdxTooltip, icons } from './codex.js';
 import { lsSet } from './format.js';
 import { navCount, route, store } from './store.js';
 import { GsTag, RoleTag, StaleBanner, SyncNote } from './components/common.js';
@@ -37,7 +37,7 @@ async function loadMeta() {
 const dataPages = ['home', 'users', 'user', 'explorer', 'projects', 'project', 'year'];
 
 const App = {
-  components: { HomePage, UsersPage, UserPage, ExplorerPage, ProjectsPage, ProjectPage, LivePage, PeoplePage, YearPage, AboutPage, StaleBanner, CdxIcon, CdxButton },
+  components: { HomePage, UsersPage, UserPage, ExplorerPage, ProjectsPage, ProjectPage, LivePage, PeoplePage, YearPage, AboutPage, StaleBanner, CdxIcon, CdxButton, CdxMenuButton },
   setup() {
     onMounted(() => { loadMeta(); loadMe(); });
     // pick up a newer sync time when moving to another page
@@ -67,7 +67,20 @@ const App = {
     });
     const toggleTheme = () => { theme.value = theme.value === 'dark' ? 'light' : 'dark'; };
     const { logo, source, commit } = document.getElementById('app').dataset;
-    return { route, navCount, nav, current, showStale, myPage, store, theme, toggleTheme, icons, logo, source, commit };
+    // on phones the name, theme and log out live in one menu so the header fits one row
+    const acctSel = ref(null);
+    const acctItems = computed(() => [
+      { value: 'me', label: (store.me && store.me.username) || '', description: myPage.value ? 'Your page' : 'Logged in', icon: icons.user },
+      { value: 'theme', label: theme.value === 'dark' ? 'Light mode' : 'Dark mode', icon: theme.value === 'dark' ? icons.sun : icons.moon },
+      { value: 'logout', label: 'Log out', icon: icons.logOut, action: 'destructive' }
+    ]);
+    function onAcct(v) {
+      if (v === 'me' && myPage.value) location.hash = myPage.value.slice(1);
+      else if (v === 'theme') toggleTheme();
+      else if (v === 'logout') location.href = 'logout';
+      acctSel.value = null;
+    }
+    return { route, navCount, nav, current, showStale, myPage, store, theme, toggleTheme, icons, logo, source, commit, acctSel, acctItems, onAcct };
   },
   template: `
 <div class="shell">
@@ -79,6 +92,7 @@ const App = {
       <span v-else class="who" v-tooltip="'Logged in as ' + store.me.username"><cdx-icon :icon="icons.user" size="small"/>{{ store.me.username }}</span>
       <a class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--size-medium" href="logout"><cdx-icon :icon="icons.logOut"/> Log out</a>
     </div>
+    <div class="acctmenu" v-if="store.me && store.me.username"><cdx-menu-button v-model:selected="acctSel" :menu-items="acctItems" :menu-config="{ visibleItemLimit: 0 }" aria-label="Account menu" @update:selected="onAcct"><cdx-icon :icon="icons.user"/></cdx-menu-button></div>
     <div class="themesw"><cdx-button weight="quiet" :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'" v-tooltip="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme"><cdx-icon :icon="theme === 'dark' ? icons.sun : icons.moon"/></cdx-button></div>
   </div></header>
   <main>

@@ -3,7 +3,7 @@ import { createApp, ref, watch } from 'vue';
 import { CdxButton, CdxIcon, CdxMessage, icons } from './codex.js';
 
 const el = document.getElementById('app');
-const cfg = { logo: el.dataset.logo, loginUrl: el.dataset.loginUrl, enabled: el.dataset.enabled === 'yes' };
+const cfg = { logo: el.dataset.logo, loginUrl: el.dataset.loginUrl, enabled: el.dataset.enabled === 'yes', source: el.dataset.source, commit: el.dataset.commit };
 
 createApp({
   components: { CdxButton, CdxIcon, CdxMessage },
@@ -36,6 +36,7 @@ createApp({
   <footer class="footer">
     <p>Brought to you by <a href="https://meta.wikimedia.org/wiki/User:Max">Max</a></p>
     <p>Powered by <a href="https://wikitech.wikimedia.org/wiki/Portal:Toolforge">Toolforge</a> &middot; <a href="https://meta.wikimedia.org/wiki/User_talk:Max">Report an issue</a></p>
+    <p><a :href="cfg.source">Source</a><template v-if="cfg.commit"> (<a class="mono" :href="cfg.source + '/commit/' + cfg.commit">{{ cfg.commit.slice(0, 7) }}</a>)</template></p>
   </footer>
 </div>`
 }).mount('#app');

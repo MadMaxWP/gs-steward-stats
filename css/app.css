@@ -27,6 +27,14 @@ main { flex: 1 0 auto; width: 100%; max-width: 1320px; margin: 0 auto; padding: 
 .nav a { display: flex; align-items: center; gap: 6px; padding: 16px 12px 13px; color: var(--color-subtle, #54595d); border-bottom: 3px solid transparent; font-weight: 700; }
 .nav a:hover { text-decoration: none; color: var(--color-progressive, #36c); }
 .nav a.on { color: var(--color-progressive, #36c); border-bottom-color: var(--color-progressive, #36c); }
+/* new actions since the live feed was last open */
+.navcount { color: var(--color-progressive, #36c); }
+.navcount::before { content: '('; }
+.navcount::after { content: ')'; }
+/* live alerts: codex toast, moved to the top right like mw.notify on the wikis */
+.cdx-toast { top: 72px; bottom: auto; left: auto; right: 16px; transform: none; width: 360px; max-width: calc(100% - 32px); }
+.cdx-toast:focus { outline: none; }
+@media (max-width: 720px) { .cdx-toast { top: 108px; right: 16px; } }
 .acct { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: .875rem; }
 .acct .who { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .themesw { margin-left: auto; display: flex; align-items: center; }

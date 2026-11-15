@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from stats import api, auth, db, live, pages, settings, stewards
+from stats import api, auth, pages, pool, settings, stewards
 
 # gunicorn runs `app` from here (see Procfile)
 
@@ -43,15 +43,16 @@ app.register_blueprint(stewards.bp)
 app.before_request(auth.require_login)
 
 
-# the live feed listens all the time, one worker holds the stream
-live.start()
+# one gunicorn worker (see Procfile), so these are the only toolsdb connections
+# the website ever has: up to 6 reading from the read only copy, and 1 on the
+# primary for the "people" page. waiting for a free one gives up after 30s
+pool.setup(read=6, write=1, wait=30, busy_wait=5)
 
 
 @app.route("/healthz")
 def healthz():
     # toolforge asks this to know the web component is up
     return "ok", 200, {"Content-Type": "text/plain", "Cache-Control": "no-store"}
-app.teardown_appcontext(db.close)
 
 
 @app.errorhandler(Exception)
@@ -60,6 +61,10 @@ def on_error(e):
         if request.path.startswith("/api/"):
             return jsonify({"error": e.description}), e.code
         return e
+    if isinstance(e, pool.PoolTimeout):
+        app.logger.warning("no free db connection for %s", request.path)
+        msg = "The site is busy right now. Please try again in a moment."
+        return (jsonify({"error": msg}), 503) if request.path.startswith("/api/") else (msg, 503)
     # log the real thing, don't show sql or hostnames to people
     app.logger.exception("unhandled error on %s", request.path)
     if request.path.startswith("/api/"):

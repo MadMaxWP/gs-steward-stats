@@ -34,7 +34,7 @@ export const AboutPage = {
     <p>Only your username and roughly when you last visited are stored, rounded to the nearest minute. You're removed from the list after 30 days without a visit.</p>
 
     <h2><cdx-icon :icon="icons.refresh"/>Where the data comes from</h2>
-    <p>Action history comes from the Wikimedia replica databases, is stored in the ToolsDB database and is synced every three hours.</p>
+    <p>Action history comes from the Wikimedia replica databases and is stored in the ToolsDB database. New actions are added from the live event stream, and a full sync from the replicas runs every three hours to fill any gaps.</p>
     <p>Steward and global sysop group history, along with local admin periods, comes from the GlobalSysopStats config and the APIs.</p>
 
     <h2><cdx-icon :icon="icons.warn"/>Accuracy</h2>

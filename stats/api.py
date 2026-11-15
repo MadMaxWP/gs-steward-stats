@@ -164,11 +164,18 @@ def export(f):
 
     head = ["timestamp_utc", "wiki", "domain", "user", "role", "log_type", "log_action", "title", "locked_wiki", "comment", "params", "log_url"]
 
-    def generate():
-        # a read pool connection on an unbuffered cursor, rows go out as they come in.
-        # it's closed afterwards rather than reused, a half read stream can't be
-        p = pool.reader()
+    # a read pool connection on an unbuffered cursor, rows go out as they come in.
+    # it's closed afterwards rather than reused, a half read stream can't be.
+    # taken here and not inside generate(), so a busy pool is a proper 503
+    p = pool.reader()
+    try:
         conn, born = p.take()
+    except Exception:
+        with _exports_lock:
+            _exports.pop(who, None)
+        raise
+
+    def generate():
         try:
             buf = io.StringIO()
             w = csv.writer(buf)
@@ -194,16 +201,28 @@ def export(f):
                     break
             yield buf.getvalue()
         finally:
-            p.give(conn, born, broken=True)
-            with _exports_lock:
-                _exports.pop(who, None)
+            done()
+
+    given = []
+
+    def done():
+        # runs when the stream ends, and again when the response closes (covers a
+        # download that never started). only the first one gives the connection back
+        if given:
+            return
+        given.append(1)
+        p.give(conn, born, broken=True)
+        with _exports_lock:
+            _exports.pop(who, None)
 
     name = re.sub(r"[^\w-]+", "_", f.get("user") or f.get("wiki") or "all")
-    return Response(
+    resp = Response(
         stream_with_context(generate()),
         mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename=gs_actions_{name}.csv"},
     )
+    resp.call_on_close(done)
+    return resp
 
 
 @bp.route("/live")

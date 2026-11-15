@@ -158,8 +158,10 @@ class Pool:
 
     # ---- running things with retries
 
-    def retry(self, fn):
-        # fn gets a connection. same retry rules as xlinks' with_retry
+    def retry(self, fn, dup_ok=False):
+        # fn gets a connection. same retry rules as xlinks' with_retry.
+        # dup_ok: a duplicate key means it's already saved, so that's fine. only for
+        # single writes, inside a transaction it would quietly lose the rest of it
         io_tries = lock_tries = busy_tries = 0
         while True:
             try:
@@ -167,8 +169,8 @@ class Pool:
                     return fn(c)
             except pymysql.err.MySQLError as e:
                 n = code(e)
-                if n == dup_code:
-                    return None  # someone already saved it, that's fine
+                if n == dup_code and dup_ok:
+                    return None
                 if n in busy_codes and busy_tries < 3:
                     busy_tries += 1
                     log.warning("%s: toolsdb is full (%s), waiting %ss", self.name, n, self.busy_wait)
@@ -198,6 +200,7 @@ pools = {"read": None, "write": None}
 
 def setup(read=0, write=1, wait=30, busy_wait=50):
     from stats import settings
+    shutdown()  # if it's called twice, don't leave the old pools and their threads around
     if write:
         pools["write"] = Pool("write", settings.db_host, write, wait, busy_wait)
     if read:
@@ -216,6 +219,7 @@ def writer():
 
 
 def shutdown():
-    for p in pools.values():
+    for k, p in pools.items():
         if p:
             p.shutdown()
+            pools[k] = None

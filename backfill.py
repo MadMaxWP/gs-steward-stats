@@ -14,6 +14,9 @@ commands (python3 backfill.py <command> --help for the options):
 sync, backfill, prune, update and all finish with the summary step on their own,
 so the web pages pick up the new numbers straight away.
 
+every toolsdb query takes a connection from a small pool (stats/pool.py) and gives
+it back straight away, nothing is held open while the replicas are being read.
+
 on toolforge it runs from the built image, e.g. a one off job:
   toolforge jobs run --image tool-gs-steward-stats/web:latest \
       --command "backfill summary" --wait gs-summary
@@ -26,12 +29,13 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pymysql
 import toolforge
 
-from stats import logparams, people, rights, toolsdb, wikimedia
+from stats import db, logparams, people, pool, rights, sync, toolsdb, wikimedia
 from stats.wikimedia import dec
 
 # log types we keep. revision/log deletion and undeletion are actions under "delete"
@@ -111,11 +115,22 @@ schema = [
     "DROP TABLE IF EXISTS gs_local_periods",
 ]
 
+# the replica is the real copy, so it overwrites whatever the listener saved first
 insert_action = (
-    "INSERT IGNORE INTO gs_actions "
+    "INSERT INTO gs_actions "
     "(wiki, log_id, actor, log_type, log_action, log_timestamp, namespace, title, comment, params) "
-    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+    "ON DUPLICATE KEY UPDATE actor = VALUES(actor), log_type = VALUES(log_type), log_action = VALUES(log_action), "
+    "log_timestamp = VALUES(log_timestamp), namespace = VALUES(namespace), title = VALUES(title), "
+    "comment = VALUES(comment), params = VALUES(params)"
 )
+
+
+@contextmanager
+def cursor():
+    # a pooled toolsdb connection for one short bit of work
+    with pool.writer().conn() as c, c.cursor() as cur:
+        yield cur
 
 
 def now_naive():
@@ -130,16 +145,12 @@ def init_schema(conn):
             cur.execute("ALTER TABLE gs_users ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'global-sysop'")
         except pymysql.err.OperationalError:
             pass  # already there
+        # the listener keeps its place in the stream here, that's longer than 255
+        cur.execute("ALTER TABLE gs_meta MODIFY v VARCHAR(1000) NOT NULL")
 
 
-def set_meta(conn, key, value=None):
-    if value is None:
-        value = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO gs_meta (k, v) VALUES (%s, %s) ON DUPLICATE KEY UPDATE v = VALUES(v)",
-            (key, str(value)[:255]),
-        )
+def set_meta(key, value=None):
+    pool.writer().retry(lambda c: sync.set_meta(c, key, value))
 
 
 def parse_ts(value):
@@ -166,7 +177,7 @@ def allowed(rules, actor, wiki, when):
 
 # ------------------------------------------------------------------ sync
 
-def sync_wikis(conn):
+def sync_wikis():
     private = wikimedia.fetch_private()
     gs = wikimedia.fetch_gs_wikis() - private
     closed = wikimedia.fetch_closed() - private
@@ -192,7 +203,7 @@ def sync_wikis(conn):
         data.append((dbname, "", 1, 1 if dbname in closed else 0, now))
     for dbname in closed - seen - gs:
         data.append((dbname, "", 0, 1, now))
-    with conn.cursor() as cur:
+    with cursor() as cur:
         # drop private wikis we might have saved before, prune then clears their rows
         cur.execute("DELETE FROM gs_wikis WHERE dbname IN (" + ", ".join(["%s"] * len(private)) + ")", sorted(private))
         cur.executemany(
@@ -201,21 +212,22 @@ def sync_wikis(conn):
             "is_locked = VALUES(is_locked), updated_at = VALUES(updated_at)",
             data,
         )
-    set_meta(conn, "last_wiki_sync")
+    set_meta("last_wiki_sync")
 
 
-def sync_users(conn):
+def sync_users():
     # returns the names that weren't current before, they need a full backfill
     members = wikimedia.fetch_members()
     current = sorted(members)
     rules = rights.user_rules(wikimedia.fetch_config().get("users", {}), current)
     now = now_naive()
-    with conn.cursor() as cur:
+    with cursor() as cur:
         cur.execute("SELECT name FROM gs_users WHERE is_current = 1")
         known = {r[0] for r in cur.fetchall()}
-    conn.autocommit(False)
-    try:
-        with conn.cursor() as cur:
+
+    def save(c):
+        # one transaction, so the pages never see everyone as not current
+        with c.cursor() as cur:
             cur.execute("UPDATE gs_users SET is_current = 0")
             for name in current:
                 firsts = [f for f, _ in rules[name]["groups"]]
@@ -225,13 +237,8 @@ def sync_users(conn):
                     "role = VALUES(role), updated_at = VALUES(updated_at)",
                     (name, min(firsts) if firsts else None, members[name], now),
                 )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.autocommit(True)
-    set_meta(conn, "last_user_sync")
+    db.write(save)
+    set_meta("last_user_sync")
     return sorted(set(current) - known)
 
 
@@ -242,9 +249,9 @@ _ns_new = set()
 _ns_lock = threading.Lock()
 
 
-def load_ns(conn):
+def load_ns():
     # everything we already know, read once before the wikis are fetched
-    with conn.cursor() as cur:
+    with cursor() as cur:
         cur.execute(namespace_table)  # for setups made before this table existed
         cur.execute("SELECT domain, names FROM gs_namespaces")
         rows = cur.fetchall()
@@ -256,7 +263,7 @@ def load_ns(conn):
                 pass
 
 
-def save_ns(conn):
+def save_ns():
     # only the domains we had to ask the api about this run
     with _ns_lock:
         found = [(d, json.dumps(_ns_cache[d], ensure_ascii=False)) for d in _ns_new if d in _ns_cache]
@@ -264,7 +271,7 @@ def save_ns(conn):
     if not found:
         return
     now = now_naive().replace(microsecond=0)
-    with conn.cursor() as cur:
+    with cursor() as cur:
         cur.executemany(
             "REPLACE INTO gs_namespaces (domain, names, updated_at) VALUES (%s, %s, %s)",
             [(d, names, now) for d, names in found],
@@ -349,8 +356,16 @@ def fetch_wiki(dbname, domain, rules, since):
     return out, time.time() - started
 
 
-def backfill(conn, only_users=None, only_wikis=None, since=None, workers=4, resume=False, after=None, locked_only=False):
-    with conn.cursor() as cur:
+def save_rows(found):
+    def go(c):
+        with c.cursor() as cur:
+            for i in range(0, len(found), 1000):
+                cur.executemany(insert_action, found[i:i + 1000])
+    pool.writer().retry(go)
+
+
+def backfill(only_users=None, only_wikis=None, since=None, workers=4, resume=False, after=None, locked_only=False):
+    with cursor() as cur:
         cur.execute("SELECT name FROM gs_users WHERE is_current = 1")
         users = [r[0] for r in cur.fetchall()]
         cur.execute("SELECT dbname, domain, is_locked FROM gs_wikis WHERE is_gs = 1 OR is_locked = 1 ORDER BY dbname")
@@ -367,7 +382,7 @@ def backfill(conn, only_users=None, only_wikis=None, since=None, workers=4, resu
     if resume:
         wikis = [(d, dom) for d, dom in wikis if d not in finished]
     elif full_run and not only_wikis:
-        with conn.cursor() as cur:
+        with cursor() as cur:
             cur.execute("DELETE FROM gs_meta WHERE k LIKE 'bf:%'")
     if after:
         wikis = [(d, dom) for d, dom in wikis if d > after]
@@ -380,11 +395,12 @@ def backfill(conn, only_users=None, only_wikis=None, since=None, workers=4, resu
         firsts = [min(f for f, _ in r["groups"]) for r in rules.values() if r["groups"]]
         since = "20010101000000" if len(firsts) < len(rules) else min(firsts).strftime("%Y%m%d%H%M%S")
 
-    load_ns(conn)
+    load_ns()
     total = done = 0
-    pool = ThreadPoolExecutor(max_workers=workers)
+    threads = workers
+    workers = ThreadPoolExecutor(max_workers=threads)
     try:
-        jobs = {pool.submit(fetch_wiki, d, dom, rules, since): d for d, dom in wikis}
+        jobs = {workers.submit(fetch_wiki, d, dom, rules, since): d for d, dom in wikis}
         for job in as_completed(jobs):
             dbname = jobs[job]
             done += 1
@@ -394,29 +410,27 @@ def backfill(conn, only_users=None, only_wikis=None, since=None, workers=4, resu
                 print(f"[{done}/{len(wikis)}] {dbname} skipped: {str(e)[:90]}", file=sys.stderr)
                 continue
             t1 = time.time()
-            with conn.cursor() as cur:
-                for i in range(0, len(found), 1000):
-                    cur.executemany(insert_action, found[i:i + 1000])
+            save_rows(found)
             if full_run:
-                set_meta(conn, "bf:" + dbname)
+                set_meta("bf:" + dbname)
             total += len(found)
             print(f"[{done}/{len(wikis)}] {dbname}: {len(found)} rows (fetch {secs:.1f}s, insert {time.time() - t1:.1f}s)", flush=True)
     except KeyboardInterrupt:
         print(f"\nStopped after {done} wikis. Finished wikis are saved, carry on with: backfill --resume", flush=True)
-        save_ns(conn)
-        pool.shutdown(wait=False, cancel_futures=True)
+        save_ns()
+        workers.shutdown(wait=False, cancel_futures=True)
         os._exit(130)  # workers may be stuck in a db call, don't wait for them
-    pool.shutdown(wait=True)
-    save_ns(conn)
-    set_meta(conn, "last_backfill")
+    workers.shutdown(wait=True)
+    save_ns()
+    set_meta("last_backfill")
     print(f"Fetched {total} rows")
     return total
 
 
 # ------------------------------------------------------------------ prune
 
-def prune(conn):
-    with conn.cursor() as cur:
+def prune():
+    with cursor() as cur:
         cur.execute("SELECT name FROM gs_users WHERE is_current = 1")
         names = [r[0] for r in cur.fetchall()]
         cur.execute("SELECT COUNT(*) FROM gs_wikis")
@@ -426,7 +440,7 @@ def prune(conn):
         return
     rules = rights.user_rules(wikimedia.fetch_config().get("users", {}), names)
     gone = offwiki = outside = local = 0
-    with conn.cursor() as cur:
+    with cursor() as cur:
         cur.execute(
             "DELETE a FROM gs_actions a LEFT JOIN gs_users u ON u.name = a.actor AND u.is_current = 1 WHERE u.name IS NULL"
         )
@@ -466,30 +480,9 @@ def prune(conn):
 
 def summarize():
     # same queries the web app would run, done once here and stored, so pages load
-    # from one row and every worker sees the same numbers
-    from stats import db, queries
-    started = time.time()
-    conn = toolsdb.connect()
-    db.use(conn)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(summary_table)  # for setups made before this table existed
-        details = queries.all_projects()
-        found = [("overview", queries.overview_live()), ("projects", queries.project_list(details))]
-        found += [("project:" + name, d) for name, d in details.items()]
-        now = now_naive().replace(microsecond=0)  # the column has no fractions, so compare like for like
-        with conn.cursor() as cur:
-            cur.executemany(
-                "REPLACE INTO gs_summary (k, v, updated_at) VALUES (%s, %s, %s)",
-                [(k, json.dumps(v, ensure_ascii=False), now) for k, v in found],
-            )
-            # anything not written this time is stale, e.g. a wiki with no actions left
-            cur.execute("DELETE FROM gs_summary WHERE updated_at < %s", (now,))
-        set_meta(conn, "last_summary")
-        print(f"Summary written: {len(found)} rows in {time.time() - started:.1f}s")
-    finally:
-        db.use(None)
-        conn.close()
+    # from one row. the listener adds live actions on top until the next run
+    n, secs = sync.rebuild()
+    print(f"Summary written: {n} rows in {secs:.1f}s")
 
 
 # ------------------------------------------------------------------ cli
@@ -520,50 +513,50 @@ def main():
     sub.add_parser("summary", help="work out the page numbers into gs_summary (the other commands do this at the end)")
     args = p.parse_args()
 
+    # 2 toolsdb connections at most: one for the summary lock, one for queries
+    pool.setup(read=0, write=2, wait=300)
     if args.cmd in ("init", "all"):
-        conn = toolsdb.connect(dict_rows=False, create=True)
-        init_schema(conn)
-        conn.close()
+        conn = toolsdb.connect(create=True)
+        try:
+            init_schema(conn)
+        finally:
+            conn.close()
         print("Schema ready")
-    conn = toolsdb.connect(dict_rows=False)
-    try:
-        if args.cmd in ("sync", "all"):
-            new = sync_users(conn)
-            sync_wikis(conn)
-            print(f"Synced users and wikis, new users: {', '.join(new) or '(none)'}")
-        if args.cmd == "backfill":
-            since = None
-            if args.since:
-                since = re.sub(r"\D", "", args.since).ljust(14, "0")[:14]
-            elif args.days:
-                since = days_ago(args.days)
-            backfill(
-                conn,
-                only_users=set(args.user) if args.user else None,
-                only_wikis=set(args.wiki) if args.wiki else None,
-                since=since,
-                workers=args.workers,
-                resume=args.resume,
-                after=args.after,
-                locked_only=args.locked_only,
-            )
-        if args.cmd == "all":
-            backfill(conn)
-        if args.cmd == "update":
-            new = sync_users(conn)
-            sync_wikis(conn)
-            if new:
-                print("New users, full backfill for:", ", ".join(new))
-                backfill(conn, only_users=set(new), workers=args.workers)
-            backfill(conn, since=days_ago(args.days), workers=args.workers)
-            prune(conn)
-            set_meta(conn, "last_update")
-        if args.cmd in ("prune", "all"):
-            prune(conn)
-    finally:
-        conn.close()
+    if args.cmd in ("sync", "all"):
+        new = sync_users()
+        sync_wikis()
+        print(f"Synced users and wikis, new users: {', '.join(new) or '(none)'}")
+    if args.cmd == "backfill":
+        since = None
+        if args.since:
+            since = re.sub(r"\D", "", args.since).ljust(14, "0")[:14]
+        elif args.days:
+            since = days_ago(args.days)
+        backfill(
+            only_users=set(args.user) if args.user else None,
+            only_wikis=set(args.wiki) if args.wiki else None,
+            since=since,
+            workers=args.workers,
+            resume=args.resume,
+            after=args.after,
+            locked_only=args.locked_only,
+        )
+    if args.cmd == "all":
+        backfill()
+    if args.cmd == "update":
+        new = sync_users()
+        sync_wikis()
+        if new:
+            print("New users, full backfill for:", ", ".join(new))
+            backfill(only_users=set(new), workers=args.workers)
+        backfill(since=days_ago(args.days), workers=args.workers)
+        prune()
+        set_meta("last_update")
+    if args.cmd in ("prune", "all"):
+        prune()
     if args.cmd != "init":
         summarize()
+    pool.shutdown()
 
 
 if __name__ == "__main__":

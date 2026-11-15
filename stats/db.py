@@ -16,7 +16,13 @@ def _run(c, sql, args):
 def rows(sql, args=None, fresh=False):
     # fresh=True reads from the primary, for things that must see a write just made
     p = pool.writer() if fresh else pool.reader()
-    return p.retry(lambda c: _run(c, sql, args))
+    try:
+        return p.retry(lambda c: _run(c, sql, args))
+    except pymysql.err.OperationalError as e:
+        # the read only copy is down (maintenance etc), the primary can still answer
+        if p is pool.writer() or pool.code(e) not in pool.io_codes:
+            raise
+        return pool.writer().retry(lambda c: _run(c, sql, args))
 
 
 def one(sql, args=None, fresh=False):
@@ -29,7 +35,7 @@ def run(sql, args=None):
     def go(c):
         with c.cursor() as cur:
             return cur.execute(sql, args)
-    return pool.writer().retry(go) or 0
+    return pool.writer().retry(go, dup_ok=True) or 0
 
 
 def write(fn):

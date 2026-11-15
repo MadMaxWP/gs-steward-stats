@@ -79,7 +79,7 @@ class Saver:
         if not self.pending:
             return
         try:
-            self.saved += sync.save_live(self.pending, self.cursor_value(mark) if mark else None)
+            self.saved += sync.save_live(self.pending, self.cursor_value(mark) if mark else None) or 0
             self.pending = []
             self.cursor = mark
         except Exception:

@@ -24,8 +24,8 @@ jobs:
       - run: pip install -r requirements.txt
       - name: python files compile and the app imports
         run: |
-          python -m compileall -q app.py backfill.py stats
-          python -c "import app"
+          python -m compileall -q app.py backfill.py listen.py stats
+          python -c "import app, listen"
       - name: js files parse
         run: |
           for f in $(find js -name '*.js'); do cp "$f" /tmp/check.mjs && node --check /tmp/check.mjs || { echo "$f"; exit 1; }; done

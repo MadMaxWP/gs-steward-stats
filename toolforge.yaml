@@ -17,11 +17,26 @@ components:
       port: 8000
       publish: /
       health_check_http: /healthz
-      # one copy only, the live feed listener lives inside it. more speed
-      # comes from gunicorn workers inside it (Procfile), not more copies
+      # one copy, one gunicorn worker with 16 threads (Procfile). it only reads
+      # toolsdb, from the read only copy, so its connections stay at 7 at most
       replicas: 1
       cpu: "1"
       memory: 1Gi
+      mount: none
+  # reads the wikimedia event stream all the time: the live feed, and saving
+  # actions to toolsdb as they happen. not public, the website asks it for the
+  # feed on http://listener:8000. only ever one copy, it's the only live writer
+  listener:
+    component_type: continuous
+    build:
+      reuse_from: web
+    run:
+      command: listener
+      port: 8000
+      health_check_http: /healthz
+      replicas: 1
+      cpu: "0.5"
+      memory: 512Mi
       mount: none
   # sync + recent backfill + summary, every 3 hours
   update:

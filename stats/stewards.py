@@ -1,11 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
-import toolforge
 from flask import Blueprint, jsonify, request
 
 from stats import logparams, rights
 from stats.cache import cached
-from stats.wikimedia import dec, fetch_config, fetch_members
+from stats.wikimedia import dec, fetch_config, fetch_members, replica
 
 # steward stats, read live from the metawiki replica. nothing is stored, the
 # answers are cached for a bit (15 min summary, 5 min lists). these numbers are
@@ -61,7 +60,7 @@ def full_title(ns, title):
 
 
 def meta_conn():
-    return toolforge.connect("metawiki_p")
+    return replica("metawiki_p")
 
 
 def sr_titles():

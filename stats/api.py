@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import pymysql
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
-from stats import auth, db, live, localadmins, people, queries, rights, toolsdb
+from stats import auth, db, live, localadmins, people, pool, queries, rights
 from stats.cache import cached
 from stats.wikimedia import fetch_config
 
@@ -165,33 +165,36 @@ def export(f):
     head = ["timestamp_utc", "wiki", "domain", "user", "role", "log_type", "log_action", "title", "locked_wiki", "comment", "params", "log_url"]
 
     def generate():
-        # its own unbuffered connection, rows go out as they come in
-        conn = toolsdb.connect(cursor=pymysql.cursors.SSCursor)
+        # a read pool connection on an unbuffered cursor, rows go out as they come in.
+        # it's closed afterwards rather than reused, a half read stream can't be
+        p = pool.reader()
+        conn, born = p.take()
         try:
             buf = io.StringIO()
             w = csv.writer(buf)
             buf.write("﻿")
             w.writerow(head)
             n = 0
-            with conn.cursor() as cur:
-                for r in queries.stream_actions(f, cur):
-                    params = queries.parse_json(r["params"])
-                    domain = r["domain"] or ""
-                    w.writerow([
-                        r["ts"], r["wiki"], domain, r["actor"], r["role"], r["log_type"], r["log_action"], r["title"],
-                        "yes" if r["locked"] else "no", r["comment"] or "", json.dumps(params, ensure_ascii=False),
-                        f"https://{domain}/wiki/Special:Redirect/logid/{r['log_id']}" if domain else "",
-                    ])
-                    n += 1
-                    if n % 500 == 0:
-                        yield buf.getvalue()
-                        buf.seek(0)
-                        buf.truncate()
-                    if n >= export_cap:
-                        break
+            # no "with" here, closing an unbuffered cursor would read the rest of the rows first
+            cur = conn.cursor(pymysql.cursors.SSCursor)
+            for r in queries.stream_actions(f, cur):
+                params = queries.parse_json(r["params"])
+                domain = r["domain"] or ""
+                w.writerow([
+                    r["ts"], r["wiki"], domain, r["actor"], r["role"], r["log_type"], r["log_action"], r["title"],
+                    "yes" if r["locked"] else "no", r["comment"] or "", json.dumps(params, ensure_ascii=False),
+                    f"https://{domain}/wiki/Special:Redirect/logid/{r['log_id']}" if domain else "",
+                ])
+                n += 1
+                if n % 500 == 0:
+                    yield buf.getvalue()
+                    buf.seek(0)
+                    buf.truncate()
+                if n >= export_cap:
+                    break
             yield buf.getvalue()
         finally:
-            conn.close()
+            p.give(conn, born, broken=True)
             with _exports_lock:
                 _exports.pop(who, None)
 

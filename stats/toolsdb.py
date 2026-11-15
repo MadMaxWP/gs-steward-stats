@@ -24,9 +24,13 @@ def db_full_name():
     return f"{user}__{settings.db_name}_p"
 
 
-def connect(dict_rows=True, create=False, cursor=None):
+def connect(dict_rows=False, create=False, cursor=None, host=None):
+    # plain tuple rows unless asked, db.py asks for dict rows itself
     user, password = replica_login()
-    opts = dict(host=settings.db_host, user=user, password=password, charset="utf8mb4", autocommit=True)
+    opts = dict(
+        host=host or settings.db_host, user=user, password=password, charset="utf8mb4", autocommit=True,
+        connect_timeout=10, read_timeout=600, write_timeout=120,
+    )
     name = f"{user}__{settings.db_name}_p"
     if create:
         c = pymysql.connect(**opts)

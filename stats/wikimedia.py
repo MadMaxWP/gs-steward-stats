@@ -1,6 +1,9 @@
 import json
+import threading
+
 import requests
 import toolforge
+
 from stats import settings
 
 # things we read from wikimedia itself: who holds the rights, which wikis are
@@ -11,6 +14,38 @@ def dec(v):
     return v.decode("utf-8", "replace") if isinstance(v, (bytes, bytearray)) else v
 
 
+# wiki replica connections are short lived, but a few pages opened at once could
+# still pile up. at most 3 at a time per process, the rest wait their turn
+replica_slots = threading.BoundedSemaphore(3)
+
+
+class Replica:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self.conn, name)
+
+    def close(self):
+        if self.conn is None:
+            return
+        try:
+            self.conn.close()
+        finally:
+            self.conn = None
+            replica_slots.release()
+
+
+def replica(dbname):
+    if not replica_slots.acquire(timeout=120):
+        raise TimeoutError("too many wiki replica connections open")
+    try:
+        return Replica(toolforge.connect(dbname))
+    except BaseException:
+        replica_slots.release()
+        raise
+
+
 def get(url, params=None, timeout=60):
     r = requests.get(url, params=params, headers={"User-Agent": settings.user_agent}, timeout=timeout)
     r.raise_for_status()
@@ -18,7 +53,7 @@ def get(url, params=None, timeout=60):
 
 
 def fetch_members():
-    conn = toolforge.connect("centralauth")
+    conn = replica("centralauth")
     try:
         with conn.cursor() as cur:
             cur.execute(

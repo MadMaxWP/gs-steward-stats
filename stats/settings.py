@@ -1,5 +1,4 @@
 import os
-import tempfile
 
 # shared settings for the web app and backfill.py
 
@@ -7,17 +6,18 @@ user_agent = "gs-steward-stats (https://meta.wikimedia.org/wiki/User:Max; madmax
 
 db_name = os.environ.get("GS_DB_NAME", "gs_actions")
 db_host = os.environ.get("GS_DB_HOST", "tools.db.svc.wikimedia.cloud")
+# the read only copy of toolsdb. the website reads from here, all writes go to db_host.
+# set GS_DB_READ_HOST to an empty value to read from db_host too
+db_read_host = os.environ.get("GS_DB_READ_HOST", "tools-readonly.db.svc.wikimedia.cloud")
+
+# the listener component, the website asks it for the live feed
+listener_url = os.environ.get("GS_LISTENER_URL", "http://listener:8000")
 
 # per user rights history, kept on meta by DreamRimmer_bot
 config_page = "User:DreamRimmer_bot/GlobalSysopStats/user-config.json"
 wikiset_name = "Opted-out of global sysop wikis"
 
 app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# the live feed files go here. every worker in the container can see it, so
-# it's how they share things. it's a short lived buffer, so plain /tmp is fine
-# and nothing needs nfs
-data_dir = os.environ.get("GS_DATA_DIR") or os.path.join(tempfile.gettempdir(), "gs-steward-stats")
-os.makedirs(data_dir, exist_ok=True)
 
 cdn = os.environ.get("GS_CDN", "https://tools-static.wmflabs.org/cdnjs/ajax/libs")
 assets = {

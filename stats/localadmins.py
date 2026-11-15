@@ -1,10 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
-import toolforge
-
 from stats import db
 from stats.stewards import to_iso
-from stats.wikimedia import dec
+from stats.wikimedia import dec, replica
 
 # local admins of one wiki, read live from that wiki's replica when someone
 # opens the project page. the api caches the answer for a while
@@ -25,7 +23,7 @@ def fetch(dbname):
     now = datetime.now(timezone.utc)
     d7, d30, d60, d90 = (stamp(now - timedelta(days=n)) for n in (7, 30, 60, 90))
     types = ", ".join(["%s"] * len(admin_types))
-    conn = toolforge.connect(dbname + "_p")
+    conn = replica(dbname + "_p")
     try:
         with conn.cursor() as cur:
             # big wikis have a lot of admins, don't let one page hold a replica forever

@@ -1,71 +1,55 @@
-from flask import g, has_app_context
+import pymysql
 
-from stats import toolsdb
+from stats import pool, toolsdb
 
-# toolsdb connection per request. it is opened on the first query and
-# closed by close() once the request is done (app.py hooks that up).
-# outside a request (backfill.py) use() hands in a connection to run on
-
-_outside = {"conn": None}
-
-
-def use(c):
-    _outside["conn"] = c
-
-
-def conn():
-    if "db" not in g:
-        g.db = toolsdb.connect()
-    return g.db
-
-
-def close(exc=None):
-    c = g.pop("db", None)
-    if c is not None:
-        try:
-            c.close()
-        except Exception:
-            pass
-
-
-def rows(sql, args=None):
-    if not has_app_context():
-        if _outside["conn"] is not None:
-            return _run(_outside["conn"], sql, args)
-        # background threads have no request, so they get a short lived connection
-        c = toolsdb.connect()
-        try:
-            return _run(c, sql, args)
-        finally:
-            c.close()
-    try:
-        return _run(conn(), sql, args)
-    except Exception:
-        # a broken connection shouldn't stick around for the rest of the request
-        close()
-        raise
+# every query takes a connection from the pool and gives it straight back.
+# reads go to the read only copy of toolsdb (if this process has a read pool),
+# writes and anything inside a transaction go to the primary
 
 
 def _run(c, sql, args):
-    with c.cursor() as cur:
+    with c.cursor(pymysql.cursors.DictCursor) as cur:
         cur.execute(sql, args)
         return [{k: toolsdb.clean(v) for k, v in r.items()} for r in cur.fetchall()]
 
 
+def rows(sql, args=None, fresh=False):
+    # fresh=True reads from the primary, for things that must see a write just made
+    p = pool.writer() if fresh else pool.reader()
+    return p.retry(lambda c: _run(c, sql, args))
+
+
+def one(sql, args=None, fresh=False):
+    r = rows(sql, args, fresh)
+    return r[0] if r else None
+
+
 def run(sql, args=None):
     # for writes, returns the affected row count
-    if not has_app_context() and _outside["conn"] is None:
-        c = toolsdb.connect()
+    def go(c):
+        with c.cursor() as cur:
+            return cur.execute(sql, args)
+    return pool.writer().retry(go) or 0
+
+
+def write(fn):
+    # fn(conn) runs inside one transaction on the primary, retried as a whole
+    # on a deadlock or a lost connection
+    def go(c):
+        c.autocommit(False)
         try:
-            with c.cursor() as cur:
-                return cur.execute(sql, args)
+            out = fn(c)
+            c.commit()
+            return out
+        except BaseException:
+            try:
+                c.rollback()
+            except Exception:
+                pass  # the pool drops a broken connection anyway
+            raise
         finally:
-            c.close()
-    c = _outside["conn"] if not has_app_context() else conn()
-    with c.cursor() as cur:
-        return cur.execute(sql, args)
-
-
-def one(sql, args=None):
-    r = rows(sql, args)
-    return r[0] if r else None
+            try:
+                c.autocommit(True)
+            except Exception:
+                pass
+    return pool.writer().retry(go)

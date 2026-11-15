@@ -1,8 +1,8 @@
-import fcntl
 import html
 import json
-import os
+import logging
 import random
+import socket
 import threading
 import time
 from collections import deque
@@ -10,38 +10,33 @@ from datetime import datetime, timezone
 
 import requests
 
-from stats import rights, settings, stewards
+from stats import db, rights, settings, stewards, sync
 from stats.logparams import normalize
-from stats.wikimedia import fetch_config, fetch_gs_wikis, fetch_members
+from stats.wikimedia import fetch_config, fetch_gs_wikis, fetch_members, fetch_private
 
-# every worker tries to grab a file lock when it starts. whoever gets it listens
-# to the wikimedia event stream the whole time and writes matching events to
-# live_feed.json in the data dir. every worker just reads that file, so all
-# viewers see the same feed.
+# the live feed. the listener component (listen.py) runs Listener all the time:
+# it reads the wikimedia event stream, keeps the last 3 hours of matching events
+# in memory for the live feed page, and hands admin actions to the saver so they
+# go into gs_actions and the summary within a few seconds.
 #
-# nothing is stored anywhere else. a deploy starts a fresh container, so the feed
-# starts empty again and fills up as things happen. a worker restart inside the
-# same container picks the stream up where it stopped (Last-Event-ID).
+# the website asks the listener for the feed over the tool's internal network,
+# see feed() at the bottom.
+#
+# the place in the stream is kept in gs_meta (live_cursor) once a batch is saved,
+# so a restart or a deploy carries on from there and nothing is missed
+
+log = logging.getLogger("gs.live")
 
 stream_url = "https://stream.wikimedia.org/v2/stream/recentchange"
 meta_logs = {"rights", "gblblock", "globalauth", "gblrights", "renameuser", "gblrename"}
 admin_types = {"delete", "block", "protect", "merge", "import", "abusefilter"}
 
-feed_file = os.path.join(settings.data_dir, "live_feed.json")
-status_file = os.path.join(settings.data_dir, "live_status.json")
-lock_file = os.path.join(settings.data_dir, "live_feed.lock")
-
 keep_events = 500
-keep_seconds = 3 * 3600  # same as the sync, older actions are on the other pages by then
-resume_window = 5 * 60    # pick the stream up where we left off if we stopped this recently
+keep_seconds = 3 * 3600   # same as the update job, older actions are on the other pages by then
+resume_max = 3 * 3600     # pick the stream up from the saved place if it's this recent
 refresh_every = 30 * 60   # reload who is a steward/gs and which wikis count
 retry_every = 60          # ...or this soon if that failed
-write_every = 2
-heartbeat_every = 10
-keeper_every = 60         # each worker checks this often that someone is listening
-
-_proc = {"thread": None, "keeper": None, "feed": (None, None), "status": (None, None)}
-_proc_lock = threading.Lock()
+hang_after = 3 * 60       # no events at all for this long means the stream is stuck
 
 
 def now_ms():
@@ -52,120 +47,60 @@ def iso(ts):
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def write_json(path, data):
-    tmp = f"{path}.{os.getpid()}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
-    os.replace(tmp, path)
-
-
-def read_json(path, slot):
-    # re-read only when the file changed, workers poll this every few seconds
+def cut(r):
+    # closing a response from another thread doesn't wake up a read that's
+    # waiting on the socket, shutting the socket down does
+    sock = None
     try:
-        mtime = os.stat(path).st_mtime_ns
-    except FileNotFoundError:
-        return None
-    cached_mtime, data = _proc[slot]
-    if cached_mtime == mtime:
-        return data
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return data
-    _proc[slot] = (mtime, data)
-    return data
-
-
-def keeper():
-    # if the worker holding the stream dies, another one takes over within a minute
-    while True:
+        sock = r.raw._fp.fp.raw._sock
+    except AttributeError:
+        sock = getattr(getattr(r.raw, "connection", None), "sock", None)
+    if sock is not None:
         try:
-            ensure_listener()
-        except Exception:
-            pass
-        time.sleep(keeper_every)
-
-
-def start():
-    # called once per worker when the app loads
-    with _proc_lock:
-        if _proc["keeper"]:
-            return
-        _proc["keeper"] = threading.Thread(target=keeper, name="live-keeper", daemon=True)
-        _proc["keeper"].start()
-
-
-def ensure_listener():
-    with _proc_lock:
-        t = _proc["thread"]
-        if t and t.is_alive():
-            return
-        fd = open(lock_file, "a")
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            sock.shutdown(socket.SHUT_RDWR)
         except OSError:
-            fd.close()  # another worker is already listening
-            return
-        t = threading.Thread(target=Listener(fd).run, name="live-feed", daemon=True)
-        _proc["thread"] = t
-        t.start()
-
-
-def feed(since):
-    ensure_listener()
-    data = read_json(feed_file, "feed") or {}
-    status = read_json(status_file, "status") or {}
-    events = [e for e in data.get("events", []) if e.get("recv", 0) > since]
-    alive = time.time() - (status.get("heartbeat") or 0) < 3 * heartbeat_every
-    status = {**status, "connected": bool(status.get("connected") and alive)}
-    return {"events": events, "status": status, "now": now_ms()}
+            pass
+    try:
+        r.close()
+    except Exception:
+        pass
 
 
 class Listener:
-    def __init__(self, lock_fd):
-        self.lock_fd = lock_fd
+    def __init__(self, saver):
+        self.saver = saver
         self.stop = threading.Event()
         self.ctx_lock = threading.Lock()
-        self.ctx = {"stewards": set(), "gsysops": set(), "gs_wikis": set(), "local": {}, "sr": {}}
+        self.ctx = {"stewards": set(), "gsysops": set(), "gs_wikis": set(), "save_wikis": set(), "local": {}, "sr": {}}
         self.status = {
             "connected": False, "started_at": iso(time.time()), "last_event_ms": 0, "total_seen": 0,
             "stewards": 0, "global_sysops": 0, "wikis": 0, "context_updated": None, "context_ok": False,
         }
-        # a restarted worker in the same container still has the files
-        old = {"events": self.load(feed_file).get("events", []), **{
-            k: v for k, v in self.load(status_file).items() if k in ("heartbeat", "last_id")}}
-        cutoff = now_ms() - keep_seconds * 1000
-        self.events = deque((e for e in old.get("events", []) if e.get("recv", 0) > cutoff), maxlen=keep_events)
-        self.keys = {e["key"] for e in self.events}
-        recent = time.time() - (old.get("heartbeat") or 0) < resume_window
-        self.last_id = old.get("last_id") if recent else None
-        self.dirty = bool(self.events)  # write what we loaded so viewers see it straight away
-        self.wrote = 0
-        self.beat = 0
+        self.events = deque(maxlen=keep_events)
+        self.keys = set()
+        self.feed_lock = threading.Lock()
+        self.last_id = None       # last event fully handled
+        self.last_seen = time.time()
+        self.response = None
+        self.counts = {"events": 0, "shown": 0, "queued": 0, "reconnects": 0}
+        self.load_cursor()
 
-    # ---- bookkeeping
+    # ---- where we were in the stream
 
-    def load(self, path):
+    def load_cursor(self):
         try:
-            with open(path, encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, ValueError):
-            return {}
+            raw = sync.get_meta("live_cursor")
+            saved = json.loads(raw) if raw else {}
+        except Exception:
+            log.exception("could not read the saved stream position")
+            saved = {}
+        if saved.get("id") and time.time() - (saved.get("at") or 0) < resume_max:
+            self.last_id = saved["id"]
+            log.info("resuming the stream from %s", iso(saved["at"]))
+        else:
+            log.info("starting the stream from now")
 
-    def save(self, force=False):
-        now = time.time()
-        if self.dirty and (force or now - self.wrote >= write_every):
-            cutoff = now_ms() - keep_seconds * 1000
-            while self.events and self.events[0].get("recv", 0) < cutoff:
-                self.keys.discard(self.events.popleft()["key"])
-            write_json(feed_file, {"events": list(self.events)})
-            self.dirty = False
-            self.wrote = now
-        if force or now - self.beat >= heartbeat_every:
-            # last_id rides along so a listener started soon after can resume from it
-            write_json(status_file, {**self.status, "heartbeat": now, "last_id": self.last_id})
-            self.beat = now
+    # ---- who and what counts
 
     def refresh(self):
         ok = True
@@ -175,13 +110,29 @@ class Listener:
                 self.ctx["stewards"] = {n for n, r in members.items() if r == "steward"}
                 self.ctx["gsysops"] = {n for n, r in members.items() if r != "steward"}
         except Exception:
+            log.exception("member refresh failed")
+            members = None
             ok = False
+        if members:
+            try:
+                self.saver.check_members(members)
+            except Exception:
+                log.exception("could not drop former members")
         try:
-            wikis = fetch_gs_wikis()
+            wikis = fetch_gs_wikis() - fetch_private()
             if wikis:
                 with self.ctx_lock:
                     self.ctx["gs_wikis"] = wikis
         except Exception:
+            log.exception("gs wiki refresh failed")
+            ok = False
+        try:
+            # gs wikis plus closed ones, the same list backfill.py reads
+            found = {r["dbname"] for r in db.rows("SELECT dbname FROM gs_wikis WHERE is_gs = 1 OR is_locked = 1")}
+            with self.ctx_lock:
+                self.ctx["save_wikis"] = found
+        except Exception:
+            log.exception("could not load the wiki list from toolsdb")
             ok = False
         try:
             cfg = fetch_config()
@@ -192,12 +143,14 @@ class Listener:
             with self.ctx_lock:
                 self.ctx["local"] = local
         except Exception:
+            log.exception("config refresh failed")
             ok = False
         try:
             titles = stewards.sr_titles()
             with self.ctx_lock:
                 self.ctx["sr"] = titles
         except Exception:
+            log.exception("sr page refresh failed")
             ok = False
         with self.ctx_lock:
             ok = ok and bool(self.ctx["stewards"]) and bool(self.ctx["gs_wikis"])
@@ -212,36 +165,50 @@ class Listener:
 
     def refresher(self, ok):
         while not self.stop.wait(refresh_every if ok else retry_every):
-            ok = self.refresh()
+            try:
+                ok = self.refresh()
+            except Exception:
+                log.exception("refresh failed")
+                ok = False
+
+    def watchdog(self):
+        # the stream sometimes goes quiet without closing. recentchange never has
+        # 3 minutes without a single event, so cut it and connect again
+        while not self.stop.wait(15):
+            if self.status["connected"] and time.time() - self.last_seen > hang_after:
+                log.warning("no events for %ss, reconnecting", hang_after)
+                r = self.response
+                if r is not None:
+                    cut(r)
+                self.last_seen = time.time()
 
     # ---- the stream
 
     def run(self):
         backoff = 1
+        # load the lists first so the opening seconds of the stream aren't thrown away
         try:
-            # load the lists first so the opening seconds of the stream aren't thrown away
             ok = self.refresh()
-            threading.Thread(target=self.refresher, args=(ok,), name="live-refresh", daemon=True).start()
-            while not self.stop.is_set():
-                try:
-                    self.listen()
-                    backoff = 1
-                    time.sleep(1)
-                except Exception:
-                    self.status["connected"] = False
-                    self.save(force=True)
-                    # back off with a bit of jitter, like the eventstreams docs ask
-                    time.sleep(backoff + random.random())
-                    backoff = min(backoff * 2, 60)
-        finally:
-            self.stop.set()
-            self.status["connected"] = False
+        except Exception:
+            log.exception("first refresh failed")
+            ok = False
+        threading.Thread(target=self.refresher, args=(ok,), name="live-refresh", daemon=True).start()
+        threading.Thread(target=self.watchdog, name="live-watchdog", daemon=True).start()
+        while not self.stop.is_set():
             try:
-                self.save(force=True)
-            except OSError:
-                pass
-            fcntl.flock(self.lock_fd, fcntl.LOCK_UN)
-            self.lock_fd.close()
+                self.listen()
+                backoff = 1
+            except Exception as e:
+                if self.stop.is_set():
+                    break
+                log.warning("stream dropped: %s", str(e)[:200])
+                # back off with a bit of jitter, like the eventstreams docs ask
+                self.stop.wait(backoff + random.random())
+                backoff = min(backoff * 2, 60)
+            finally:
+                self.status["connected"] = False
+                self.response = None
+            self.counts["reconnects"] += 1
 
     def listen(self):
         headers = {"User-Agent": settings.user_agent, "Accept": "text/event-stream"}
@@ -250,11 +217,13 @@ class Listener:
         with requests.get(stream_url, headers=headers, stream=True, timeout=(15, 60)) as r:
             r.raise_for_status()
             r.encoding = "utf-8"
+            self.response = r
             self.status["connected"] = True
-            self.save(force=True)
+            self.last_seen = time.time()
             pending = None
             for line in r.iter_lines(decode_unicode=True):
-                self.save()
+                if self.stop.is_set():
+                    return
                 if not line:
                     # end of one event. only now move the resume point, so a cut
                     # connection never skips an event we didn't handle yet
@@ -266,11 +235,12 @@ class Listener:
                     pending = line[3:].strip()
                     continue
                 if line.startswith("data:"):
+                    self.last_seen = time.time()
+                    self.counts["events"] += 1
                     try:
                         self.handle(json.loads(line[5:]))
                     except Exception:
                         continue
-        self.status["connected"] = False
 
     def handle(self, change):
         kind = change.get("type")
@@ -286,6 +256,7 @@ class Listener:
             is_st = user in self.ctx["stewards"]
             is_gs = user in self.ctx["gsysops"]
             gs_wikis = self.ctx["gs_wikis"]
+            save_wikis = self.ctx["save_wikis"]
             local = self.ctx["local"].get(user, {})
             sr = self.ctx["sr"]
         if not (is_st or is_gs):
@@ -293,7 +264,8 @@ class Listener:
         ts = change.get("timestamp") or int(time.time())
 
         if kind != "log":
-            # edits only count on the steward request pages on meta, by stewards
+            # edits only count on the steward request pages on meta, by stewards.
+            # these are only shown, they aren't admin actions
             title = change.get("title") or ""
             if wiki != "metawiki" or not is_st or title not in sr:
                 return
@@ -302,7 +274,7 @@ class Listener:
             rev = (change.get("revision") or {}).get("new")
             if not rev:
                 return
-            self.add({
+            self.show({
                 "key": f"metawiki:rev:{rev}", "wiki": wiki, "domain": domain, "log_id": rev, "actor": user,
                 "role": "steward", "log_type": "sr", "log_action": "edit", "title": title,
                 "comment": self.comment(change), "params": {}, "ts": iso(ts),
@@ -310,36 +282,85 @@ class Listener:
             return
 
         lt = change.get("log_type")
-        if wiki == "metawiki":
-            # on meta only the steward logs (rights, global blocks, locks, renames)
-            if not is_st or lt not in meta_logs:
-                return
-        elif wiki not in gs_wikis or lt not in admin_types:
-            return
         log_id = change.get("log_id")
         if not log_id:
             return
         when = datetime.fromtimestamp(ts, timezone.utc).replace(tzinfo=None)
-        if wiki != "metawiki" and rights.in_periods(local.get(wiki, []), when):
-            return  # they were a local admin there at the time
-        self.add({
-            "key": f"{wiki}:{log_id}", "wiki": wiki, "domain": domain, "log_id": log_id, "actor": user,
-            "role": "steward" if is_st else "global-sysop", "log_type": lt, "log_action": change.get("log_action"),
-            "title": change.get("title") or "", "comment": self.comment(change),
+        if wiki == "metawiki":
+            # on meta only the steward logs (rights, global blocks, locks, renames), shown only
+            if is_st and lt in meta_logs:
+                self.show(self.row(change, wiki, domain, user, is_st, lt, ts))
+            return
+        if lt not in admin_types or rights.in_periods(local.get(wiki, []), when):
+            return  # not an admin action, or they were a local admin there at the time
+        row = self.row(change, wiki, domain, user, is_st, lt, ts)
+        if wiki in gs_wikis:
+            self.show(row)
+        if wiki in save_wikis:
+            self.counts["queued"] += 1
+            self.saver.add({
+                "wiki": wiki, "log_id": int(log_id), "actor": user, "log_type": lt,
+                "log_action": change.get("log_action") or "", "when": when, "ts": iso(ts),
+                "namespace": int(change.get("namespace") or 0), "title": change.get("title") or "",
+                "comment": html.unescape(change.get("comment") or ""),
+                "params": json.dumps(row["params"], ensure_ascii=False),
+            })
+
+    def row(self, change, wiki, domain, user, is_st, lt, ts):
+        return {
+            "key": f"{wiki}:{change.get('log_id')}", "wiki": wiki, "domain": domain, "log_id": change.get("log_id"),
+            "actor": user, "role": "steward" if is_st else "global-sysop", "log_type": lt,
+            "log_action": change.get("log_action"), "title": change.get("title") or "", "comment": self.comment(change),
             "params": normalize(change.get("log_params")), "ts": iso(ts),
-        })
+        }
 
     def comment(self, change):
         return html.unescape(change.get("comment") or "").replace("\n", " ").strip()[:1000]
 
-    def add(self, row):
-        if row["key"] in self.keys:
-            return
-        row["recv"] = now_ms()
-        if len(self.events) == self.events.maxlen:
-            self.keys.discard(self.events[0]["key"])
-        self.events.append(row)
-        self.keys.add(row["key"])
-        self.status["total_seen"] += 1
-        self.status["last_event_ms"] = row["recv"]
-        self.dirty = True
+    def show(self, row):
+        with self.feed_lock:
+            if row["key"] in self.keys:
+                return
+            # an old event (replayed after a restart) gets its own time, so open pages
+            # don't treat it as new and alert for it again
+            when = datetime.strptime(row["ts"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+            row["recv"] = now_ms() if time.time() - when < 600 else int(when * 1000)
+            if len(self.events) == self.events.maxlen:
+                self.keys.discard(self.events[0]["key"])
+            self.events.append(row)
+            self.keys.add(row["key"])
+            self.status["total_seen"] += 1
+            self.status["last_event_ms"] = row["recv"]
+            self.counts["shown"] += 1
+
+    def feed(self):
+        cutoff = now_ms() - keep_seconds * 1000
+        with self.feed_lock:
+            while self.events and self.events[0].get("recv", 0) < cutoff:
+                self.keys.discard(self.events.popleft()["key"])
+            events = list(self.events)
+        return {"events": events, "status": dict(self.status), "now": now_ms()}
+
+
+# ------------------------------------------------------------------ the website side
+
+_web = {"at": 0, "data": None}
+_web_lock = threading.Lock()
+web_cache = 2  # seconds, every open tab polls, the listener is only asked this often
+
+
+def feed(since):
+    with _web_lock:
+        if time.time() - _web["at"] >= web_cache:
+            try:
+                r = requests.get(settings.listener_url + "/feed", timeout=5)
+                r.raise_for_status()
+                _web["data"] = r.json()
+            except Exception:
+                # listener restarting or down, keep the last copy but show it as disconnected
+                old = _web["data"] or {"events": [], "status": {}}
+                _web["data"] = {**old, "status": {**old.get("status", {}), "connected": False}}
+            _web["at"] = time.time()
+        data = _web["data"]
+    events = [e for e in data.get("events", []) if e.get("recv", 0) > since]
+    return {"events": events, "status": data.get("status") or {"connected": False}, "now": now_ms()}

@@ -56,7 +56,7 @@ def valid_date(s):
 def data_version():
     # changes whenever the db is refreshed, so cache keys built with it never outlive a sync
     def q():
-        r = db.one("SELECT MAX(v) AS v FROM gs_meta WHERE k IN ('last_backfill', 'last_update', 'last_summary')")
+        r = db.one("SELECT MAX(v) AS v FROM gs_meta WHERE k IN ('last_backfill', 'last_update', 'last_summary', 'last_live', 'last_recount')")
         return (r or {}).get("v") or ""
     return cached(("data_version",), 30, q)[0]
 
@@ -404,6 +404,30 @@ def all_projects():
     return out
 
 
+def window_counts():
+    # just the rolling "last n days" numbers, for the listener's hourly recount.
+    # only reads the last year, so it stays on the timestamp index
+    base = f"(SELECT a.wiki, a.actor, a.log_timestamp AS ts, {locked} AS lk {from_sql} WHERE a.log_timestamp >= UTC_TIMESTAMP() - INTERVAL 365 DAY) x"
+    totals = db.one(
+        "SELECT COALESCE(SUM(lk = 0 AND ts >= UTC_TIMESTAMP() - INTERVAL 1 DAY), 0) AS d1, "
+        "COALESCE(SUM(lk = 0 AND ts >= UTC_TIMESTAMP() - INTERVAL 7 DAY), 0) AS d7, "
+        f"COALESCE(SUM(lk = 0 AND ts >= UTC_TIMESTAMP() - INTERVAL 30 DAY), 0) AS d30 FROM {base}"
+    )
+    users = db.rows(
+        "SELECT actor, SUM(lk = 0 AND ts >= UTC_TIMESTAMP() - INTERVAL 30 DAY) AS c30, "
+        f"SUM(lk = 0 AND ts >= UTC_TIMESTAMP() - INTERVAL 90 DAY) AS c90 FROM {base} GROUP BY actor"
+    )
+    projects = db.rows(
+        "SELECT wiki, SUM(ts >= UTC_TIMESTAMP() - INTERVAL 30 DAY) AS c30, "
+        f"SUM(ts >= UTC_TIMESTAMP() - INTERVAL 90 DAY) AS c90, COUNT(*) AS c365 FROM {base} GROUP BY wiki"
+    )
+    return {
+        "totals": totals,
+        "users": {r.pop("actor"): r for r in users},
+        "projects": {r.pop("wiki"): r for r in projects},
+    }
+
+
 def project_list(details):
     # the projects page list, from all_projects() plus gs wikis with no actions yet
     out = []
@@ -467,5 +491,5 @@ def meta():
         "SELECT dbname, domain, is_locked FROM gs_wikis "
         "WHERE is_gs = 1 OR dbname IN (SELECT DISTINCT wiki FROM gs_actions) ORDER BY domain"
     )
-    updated = {r["k"]: r["v"] for r in db.rows("SELECT k, v FROM gs_meta WHERE k NOT LIKE 'bf:%'")}
+    updated = {r["k"]: r["v"] for r in db.rows("SELECT k, v FROM gs_meta WHERE k NOT LIKE 'bf:%' AND k <> 'live_cursor'")}
     return {"users": members, "wikis": wikis, "updated": updated}

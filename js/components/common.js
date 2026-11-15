@@ -23,10 +23,10 @@ export const RoleTag = {
   template: `<span class="role-tag" :class="role === 'steward' ? 'is-steward' : 'is-gs'">{{ role === 'steward' ? 'Steward' : 'Global sysop' }}</span>`
 };
 
-// newest of the two sync times the backfill script writes
+// newest of the sync times: the update job's, and the listener's when it saves a live action
 export const lastSync = () => {
   const u = store.meta && store.meta.updated;
-  return u ? [u.last_update, u.last_backfill].filter(Boolean).sort().pop() || '' : '';
+  return u ? [u.last_update, u.last_backfill, u.last_live].filter(Boolean).sort().pop() || '' : '';
 };
 
 export const SyncNote = {

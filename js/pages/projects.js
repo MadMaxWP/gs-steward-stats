@@ -1,8 +1,8 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { api } from '../api.js';
 import { CdxIcon, CdxMessage, CdxSelect, CdxTable, CdxTextInput, icons } from '../codex.js';
-import { ago, fillMonths, fmtTs, num, plural } from '../format.js';
-import { actionLabel, roleName, wikiLink } from '../logs.js';
+import { ago, fillMonths, fmtDate, fmtDay, fmtTs, num, plural } from '../format.js';
+import { actionLabel, commentParts, metaUser, roleName, wikiLink } from '../logs.js';
 import { route, setQuery } from '../store.js';
 import { sortRows } from './users.js';
 import { ActionExplorer } from '../components/actions.js';
@@ -169,10 +169,57 @@ export const LocalAdmins = {
 </section>`
 };
 
+// opt in / opt out history from the global sysop wiki set on meta
+export const GsAccess = {
+  props: { wiki: String },
+  components: { CdxIcon, CdxMessage, CdxTable, CacheBar },
+  setup(p) {
+    const d = ref(null), err = ref(''), busy = ref(false);
+    async function load(fresh) {
+      busy.value = true;
+      try { d.value = await api('project/' + encodeURIComponent(p.wiki) + '/gs-access', { refresh: fresh ? '1' : '' }); err.value = ''; }
+      catch (e) { err.value = e.message; }
+      finally { busy.value = false; }
+    }
+    onMounted(() => load(false));
+    const cols = [{ id: 'ts', label: 'Date' }, { id: 'change', label: 'Change' }, { id: 'actor', label: 'By' }, { id: 'comment', label: 'Reason', minWidth: '240px' }, { id: 'log', label: 'Log' }];
+    const rows = computed(() => (d.value ? [...d.value.events].reverse() : []));
+    const line = computed(() => {
+      if (!d.value) return '';
+      const ev = d.value.events, last = ev[ev.length - 1];
+      if (!last) return 'Never on the opt-out list, so global sysops have had access since the wiki was created.';
+      const since = fmtDay(last.ts) + (last.initial ? ', when the opt-out list started' : '');
+      return d.value.opted_out ? 'Opted out of global sysops since ' + since + '.' : 'Global sysop wiki since ' + since + '.';
+    });
+    const old = computed(() => d.value && d.value.events.some(e => e.ts < '2022'));
+    const comment = c => commentParts(c, 'meta.wikimedia.org');
+    const logUrl = id => 'https://meta.wikimedia.org/wiki/Special:Redirect/logid/' + id;
+    return { d, err, busy, load, cols, rows, line, old, comment, logUrl, metaUser, fmtDate, icons };
+  },
+  template: `
+<section class="panel">
+  <h2>Global sysop access</h2>
+  <cdx-message v-if="err" type="error">{{ err }}</cdx-message>
+  <div v-else-if="!d" class="loading"><cdx-progress-indicator>Loading</cdx-progress-indicator> Reading the wiki set log</div>
+  <template v-else>
+    <cache-bar :at="d.cached_at" :busy="busy" @refresh="load(true)"/>
+    <p>{{ line }}</p>
+    <cdx-table v-if="rows.length" caption="Opt-in and opt-out history" hide-caption :columns="cols" :data="rows">
+      <template #item-ts="{ item }"><span class="nw">{{ fmtDate(item) }}</span></template>
+      <template #item-change="{ row }"><gs-tag :status="row.change === 'in' ? 'success' : 'warning'">{{ row.change === 'in' ? 'Opted in' : 'Opted out' }}</gs-tag></template>
+      <template #item-actor="{ item }"><a class="nw" :href="metaUser(item)" target="_blank" rel="noopener">{{ item }}</a></template>
+      <template #item-comment="{ row }"><span class="sent"><template v-for="(s, i) in comment(row.comment)" :key="i"><a v-if="s.href" :href="s.href" :class="s.cls" target="_blank" rel="noopener">{{ s.v }}</a><span v-else :class="s.cls">{{ s.v }}</span></template></span></template>
+      <template #item-log="{ row }"><a :href="logUrl(row.log_id)" target="_blank" rel="noopener" aria-label="View log" v-tooltip="'View log'"><cdx-icon :icon="icons.ext" size="small"/></a></template>
+    </cdx-table>
+    <p v-if="old" class="muted small gsnote">Wiki set logs from before 2022 are in an older format, so there's a small chance one of those entries is read wrong.</p>
+  </template>
+</section>`
+};
+
 // one wiki: who acts there, what they do, and when
 export const ProjectPage = {
   props: { name: String },
-  components: { ActionExplorer, StatCard, BarChart, RankBars, CdxIcon, CdxMessage, CacheBar, LocalAdmins },
+  components: { ActionExplorer, StatCard, BarChart, RankBars, CdxIcon, CdxMessage, CacheBar, LocalAdmins, GsAccess },
   setup(p) {
     const query = route.value.query;
     const d = ref(null), err = ref(''), busy = ref(false);
@@ -223,6 +270,7 @@ export const ProjectPage = {
       <section class="panel"><h2>Actions by type</h2><rank-bars :items="types" share :limit="8"/></section>
     </div>
     <local-admins v-if="d.domain" :wiki="d.dbname" :domain="d.domain" :gs30="Number(d.summary.c30)" :gs90="Number(d.summary.c90)"/>
+    <gs-access :wiki="d.dbname"/>
     <section class="panel"><h2>Actions per month</h2><bar-chart :data="months"/></section>
     <section class="panel"><h2>Actions</h2><action-explorer :wiki="d.dbname" :initial="query" sync/></section>
   </template>

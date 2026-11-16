@@ -15,7 +15,7 @@ from stats.logparams import normalize
 from stats.wikimedia import fetch_config, fetch_gs_wikis, fetch_members, fetch_private
 
 # the live feed. the listener component (listen.py) runs Listener all the time:
-# it reads the wikimedia event stream, keeps the last 3 hours of matching events
+# it reads the wikimedia event stream, keeps the last 12 hours of matching events
 # in memory for the live feed page, and hands admin actions to the saver so they
 # go into gs_actions and the summary within a few seconds.
 #
@@ -32,8 +32,8 @@ stream_url = "https://stream.wikimedia.org/v2/stream/recentchange"
 meta_logs = {"rights", "gblblock", "globalauth", "gblrights", "renameuser", "gblrename"}
 admin_types = {"delete", "block", "protect", "merge", "import", "abusefilter"}
 
-keep_events = 500
-keep_seconds = 3 * 3600   # same as the update job, older actions are on the other pages by then
+keep_events = 2000
+keep_seconds = 12 * 3600
 feed_key = ("feed",)
 publish_every = 2         # the feed goes to redis this often when something changed
 heartbeat = 10            # ...and at least this often anyway, so the website knows it's alive
@@ -89,7 +89,20 @@ class Listener:
         self.response = None
         self.counts = {"events": 0, "shown": 0, "queued": 0, "reconnects": 0}
         self.changed = True
+        self.load_feed()
         self.load_cursor()
+
+    def load_feed(self):
+        # pick the feed up from redis after a restart, so a deploy doesn't empty it.
+        # whatever the stream replays on top is dropped as a repeat
+        data = cache.get(feed_key)
+        cutoff = now_ms() - keep_seconds * 1000
+        for e in (data or {}).get("events") or []:
+            if e.get("recv", 0) >= cutoff and e.get("key") not in self.keys:
+                self.events.append(e)
+                self.keys.add(e["key"])
+        if self.events:
+            log.info("picked up %s feed events from redis", len(self.events))
 
     # ---- where we were in the stream
 

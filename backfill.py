@@ -35,7 +35,7 @@ from datetime import datetime, timedelta, timezone
 import pymysql
 import toolforge
 
-from stats import cache, db, logparams, people, pool, rights, sync, toolsdb, wikimedia
+from stats import db, logparams, people, pool, rights, sync, toolsdb, wikimedia
 from stats.wikimedia import dec
 
 # log types we keep. revision/log deletion and undeletion are actions under "delete"
@@ -151,8 +151,6 @@ def init_schema(conn):
 
 def set_meta(key, value=None):
     pool.writer().retry(lambda c: sync.set_meta(c, key, value))
-    if key in ("last_backfill", "last_update"):
-        cache.bump_version(sync.iso_now())
 
 
 def parse_ts(value):

@@ -72,9 +72,7 @@ export function alertFor(found) {
 // when the live feed page was last open, everything after that counts as new
 export const markSeen = () => { lsSet('gs-live-seen', String(Date.now())); unseen.value = 0; };
 
-// only what came in after the feed page was last open counts, so start there
-// instead of downloading the whole 12 hours on every page load
-let since = Number(lsGet('gs-live-seen', '0')), first = true, started = false;
+let since = 0, started = false;
 const known = new Set();
 
 async function poll() {
@@ -87,13 +85,12 @@ async function poll() {
     if (!onLive) {
       // count from the full list on the first answer, then just add the new ones
       const fresh = d.events.filter(e => !known.has(e.key) && e.recv > seenAt && matchesFilters(e, f));
-      unseen.value = first ? fresh.length : unseen.value + fresh.length;
-      if (!first) alertFor(fresh);
+      unseen.value = since === 0 ? fresh.length : unseen.value + fresh.length;
+      if (since > 0) alertFor(fresh);
     }
     d.events.forEach(e => known.add(e.key));
     // a little overlap so nothing slips between two answers, the set drops repeats
     since = Math.max(0, d.now - 20000);
-    first = false;
   } catch (e) {}
   setTimeout(poll, document.hidden ? 30000 : 15000);
 }

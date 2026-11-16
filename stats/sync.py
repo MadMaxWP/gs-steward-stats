@@ -2,7 +2,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 
-from stats import db, pool, queries, settings
+from stats import cache, db, pool, queries, settings
 
 # the bits the update job (backfill.py) and the listener (listen.py) both need:
 # gs_meta, rebuilding gs_summary, adding live actions to it, and dropping people
@@ -102,6 +102,8 @@ def rebuild():
             set_meta(c, "last_summary")
             set_meta(c, "last_recount")
         db.write(save)
+    # only after the commit, so nobody caches old data under the new version
+    cache.bump_version(iso_now())
     return len(found), time.time() - started
 
 
@@ -149,7 +151,10 @@ def save_live(rows, cursor=None):
         finally:
             with c.cursor() as cur:
                 cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name(),))
-    return pool.writer().retry(go)
+    n = pool.writer().retry(go) or 0
+    if n:
+        cache.bump_version(iso_now())
+    return n
 
 
 def _save_live(c, rows):
@@ -314,7 +319,9 @@ def recount():
         if not db.one("SELECT k FROM gs_summary WHERE k = 'overview'", fresh=True):
             return 0
         win = queries.window_counts()
-        return db.write(lambda c: _recount(c, win))
+        n = db.write(lambda c: _recount(c, win))
+    cache.bump_version(iso_now())
+    return n
 
 
 def _recount(c, win):

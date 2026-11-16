@@ -4,7 +4,7 @@ import { CdxButton, CdxCheckbox, CdxField, CdxIcon, CdxMessage, CdxSelect, CdxTe
 import { ago, lsGet, lsJson, lsSet } from '../format.js';
 import { liveCats } from '../logs.js';
 import { ActionList, modeItems } from '../components/actions.js';
-import { alertFor, chime, liveFilters, markSeen, matchesFilters, startAudio } from '../livewatch.js';
+import { alertFor, chime, every, liveFilters, markSeen, matchesFilters, startAudio } from '../livewatch.js';
 
 export const LivePage = {
   components: { ActionList, CdxSelect, CdxTextInput, CdxToggleButtonGroup, CdxButton, CdxCheckbox, CdxIcon, CdxMessage, CdxField },
@@ -49,7 +49,7 @@ export const LivePage = {
         }
         if (d.events.length) {
           items.value.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
-          if (items.value.length > 500) items.value.length = 500;
+          if (items.value.length > 2000) items.value.length = 2000;
         }
         // the first answer is history, only later ones can alert
         alertFor(fresh.filter(matches));
@@ -57,8 +57,8 @@ export const LivePage = {
         since = Math.max(0, d.now - 20000);
       } catch (e) { err.value = e.message; }
     }
-    onMounted(() => { markSeen(); poll(); timer = setInterval(poll, 4000); });
-    onBeforeUnmount(() => { clearInterval(timer); markSeen(); });
+    onMounted(() => { markSeen(); poll(); timer = every(4000, poll); });
+    onBeforeUnmount(() => { if (timer) timer.stop(); markSeen(); });
     watch(mode, v => lsSet('gs-live-mode', v));
 
     const catItems = [{ value: 'all', label: 'All actions' }, ...liveCats];

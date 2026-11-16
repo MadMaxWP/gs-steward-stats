@@ -10,6 +10,13 @@ db_host = os.environ.get("GS_DB_HOST", "tools.db.svc.wikimedia.cloud")
 # set GS_DB_READ_HOST to an empty value to read from db_host too
 db_read_host = os.environ.get("GS_DB_READ_HOST", "tools-readonly.db.svc.wikimedia.cloud")
 
+# toolforge's shared redis. GS_REDIS_PREFIX is a long random secret (openssl
+# rand -base64 32), every key starts with it. not set means no redis
+redis_host = os.environ.get("GS_REDIS_HOST", "redis.svc.tools.eqiad1.wikimedia.cloud")
+redis_port = int(os.environ.get("GS_REDIS_PORT", "6379"))
+redis_prefix = os.environ.get("GS_REDIS_PREFIX", "")
+redis_connections = int(os.environ.get("GS_REDIS_CONNECTIONS", "8"))
+
 # the listener component, the website asks it for the live feed
 listener_url = os.environ.get("GS_LISTENER_URL", "http://listener:8000")
 

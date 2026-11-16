@@ -238,8 +238,17 @@ export const ProjectPage = {
       return [...m.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
     });
     const months = computed(() => (d.value ? fillMonths(d.value.monthly).slice(-36) : []));
+    // "by 2 current global sysops", "by 1 current steward and 3 global sysops"
+    const byWho = computed(() => {
+      if (!d.value || !d.value.users.length) return '';
+      const st = d.value.users.filter(u => u.role === 'steward').length;
+      const gs = d.value.users.length - st;
+      if (!gs) return 'by ' + plural(st, 'current steward');
+      if (!st) return 'by ' + plural(gs, 'current global sysop');
+      return 'by ' + plural(st, 'current steward') + ' and ' + plural(gs, 'global sysop');
+    });
     const site = computed(() => (d.value && d.value.domain ? wikiLink(d.value.domain, 'Special:Log') : ''));
-    return { query, d, err, busy, load, people, types, months, site, roleName, icons, num, ago, fmtTs, plural };
+    return { query, d, err, busy, load, people, types, months, byWho, site, roleName, icons, num, ago, fmtTs, plural };
   },
   template: `
 <div>
@@ -261,7 +270,7 @@ export const ProjectPage = {
       </div>
     </div>
     <div class="stats">
-      <stat-card label="Actions" :value="num(d.summary.total)" :icon="icons.check" tone="ok" :hint="'by ' + plural(d.summary.users, 'current user')"/>
+      <stat-card label="Actions" :value="num(d.summary.total)" :icon="icons.check" tone="ok" :hint="byWho"/>
       <stat-card label="Last 30 days" :value="num(d.summary.c30)" :icon="icons.calendar" tone="info" :hint="num(d.summary.c90) + ' in 90 days, ' + num(d.summary.c365) + ' in a year'"/>
       <stat-card label="Last action" :value="ago(d.summary.last_ts)" :icon="icons.clock" tone="info" :hint="d.summary.last_ts ? fmtTs(d.summary.last_ts) : ''"/>
     </div>

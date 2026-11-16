@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pymysql
 
-from stats import db, rights, toolsdb
+from stats import cache, db, rights, toolsdb
 from stats.cache import cached
 from stats.wikimedia import fetch_config
 
@@ -54,11 +54,17 @@ def valid_date(s):
 
 
 def data_version():
-    # changes whenever the db is refreshed, so cache keys built with it never outlive a sync
+    # changes whenever the db is refreshed, so cache keys built with it never outlive a sync.
+    # the listener and update job keep it in redis, toolsdb is only asked when it's not there
     def q():
+        v = cache.read_version()
+        if v:
+            return v
         r = db.one("SELECT MAX(v) AS v FROM gs_meta WHERE k IN ('last_backfill', 'last_update', 'last_summary', 'last_live', 'last_recount')")
-        return (r or {}).get("v") or ""
-    return cached(("data_version",), 30, q)[0]
+        v = (r or {}).get("v") or ""
+        cache.set_version(v)
+        return v
+    return cached(("data_version",), 2 if cache.client() else 30, q, shared=False)[0]
 
 
 def config_users():

@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { CdxButton, CdxMessage, CdxTable, icons } from '../codex.js';
 import { ago, fillMonths, fmtDay, fmtTs, monthNames, num, plural, ymFromDate, ymMonthsBack } from '../format.js';
 import { activity, gsInactive, roleName } from '../logs.js';
-import { pins, route, setQuery, store } from '../store.js';
+import { pins, route, setQuery } from '../store.js';
 import { ActionList } from '../components/actions.js';
 import { BarChart, RankBars } from '../components/charts.js';
 import { CacheBar, PeriodPicker, PinButton, StatCard, periodLabel, periodRange } from '../components/common.js';
@@ -88,29 +88,9 @@ export const HomePage = {
     ];
     const pinned = computed(() => users.value.filter(u => pins.value.includes(u.name)));
 
-    // only for a logged in steward or global sysop: where they stand.
-    // the 6 month inactivity rule is for global sysops, stewards just get their activity
-    const myStatus = computed(() => {
-      const me = store.me && store.me.username;
-      const u = me && users.value.find(x => x.name === me);
-      if (!u) return null;
-      const a = activity(u);
-      // stewards also do locks etc on meta, so say gs wiki for them
-      const where = u.role === 'steward' ? ' on a GS wiki' : '';
-      const last = u.last_ts ? 'Your last recorded action' + where + ' was ' + ago(u.last_ts) + '.' : 'You have no recorded actions' + where.replace('a GS wiki', 'GS wikis') + ' yet.';
-      // stewards have no inactivity rule here, so just the status
-      if (u.role === 'steward') return { type: a.key === 'active' || a.key === 'moderate' ? 'success' : 'notice', text: 'Your activity: ' + a.label + '. ' + last };
-      if (a.key === 'inactive') return { type: 'error', text: last + ' That is 6 months or more, which meets the inactivity criterion for removal.' };
-      // the inactivity date only matters once someone has gone quiet for 2 months
-      if (a.key !== 'semi') return { type: 'success', text: 'Your activity: ' + a.label + '. ' + last };
-      const until = new Date(u.last_ts || u.role_since || u.first_granted);
-      until.setUTCMonth(until.getUTCMonth() + 6);
-      return { type: 'warning', text: 'Your activity: ' + a.label + '. ' + last + ' Under the 6 month rule you would count as inactive from ' + fmtDay(until.toISOString()) + ' if you make no more actions.' };
-    });
-
     return {
       d, err, busy, load, per, range, ranged, recent, top, months, active, activeInRange, gsCount, inactive, label,
-      pinCols, pinned, myStatus, year, yearLine, yearDone, yearLink, activity, roleName, icons, num, ago, fmtTs
+      pinCols, pinned, year, yearLine, yearDone, yearLink, activity, roleName, icons, num, ago, fmtTs
     };
   },
   template: `
@@ -124,20 +104,19 @@ export const HomePage = {
       <period-picker v-model="per"/>
     </div>
     <cdx-message v-if="!d.totals.total && !d.totals.locked" type="warning">No data yet. Run backfill.py to fill the database.</cdx-message>
-    <cdx-message v-if="myStatus" :type="myStatus.type" class="mb">{{ myStatus.text }}</cdx-message>
     <div class="stats" v-if="ranged">
       <stat-card label="Actions in this period" :value="num(ranged.total)" :icon="icons.contrib" tone="ok" :hint="label + ', active GS projects'"/>
       <stat-card label="Users with actions" :value="activeInRange + ' / ' + d.users.length" :icon="icons.userActive" tone="info" :hint="label"/>
-      <stat-card label="Closed/Locked project actions" :value="num(ranged.locked)" :icon="icons.lock" tone="warn" :hint="label + ', listed separately'"/>
+      <stat-card label="Closed/Locked project actions" :value="num(ranged.locked)" :icon="icons.lock" tone="warn" :hint="label + ', not included in the period total'"/>
       <stat-card label="Inactive global sysops" :value="inactive + ' / ' + gsCount" :icon="icons.warn" :tone="inactive ? 'err' : 'ok'" hint="No action in 6 months, as of today"/>
     </div>
     <div class="stats" v-else>
-      <stat-card label="Actions by current users" :value="num(d.totals.total)" :icon="icons.contrib" tone="ok" hint="Current stewards and global sysops only, active GS projects"/>
+      <stat-card label="Total actions" :value="num(d.totals.total)" :icon="icons.contrib" tone="ok" hint="By current stewards and global sysops on active GS projects"/>
       <stat-card label="Last 24 hours" :value="num(d.totals.d1)" :icon="icons.clock" tone="info" :hint="num(d.totals.d7) + ' in 7 days'"/>
       <stat-card label="Last 30 days" :value="num(d.totals.d30)" :icon="icons.calendar" tone="info"/>
       <stat-card label="Active users" :value="active + ' / ' + d.users.length" :icon="icons.userActive" tone="info" hint="Last action within a month"/>
       <stat-card label="Inactive global sysops" :value="inactive + ' / ' + gsCount" :icon="icons.warn" :tone="inactive ? 'err' : 'ok'" hint="No action in 6 months, active or closed/locked projects"/>
-      <stat-card label="Closed/Locked project actions" :value="num(d.totals.locked)" :icon="icons.lock" tone="warn" hint="Listed separately"/>
+      <stat-card label="Closed/Locked project actions" :value="num(d.totals.locked)" :icon="icons.lock" tone="warn" hint="Not included in total actions"/>
     </div>
     <section class="panel" v-if="pinned.length">
       <div class="panelhead"><h2>Pinned users</h2><a href="#/users?pinned=1">Show in users list</a></div>

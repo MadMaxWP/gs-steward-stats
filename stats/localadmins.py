@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta, timezone
 
 from stats import db
@@ -9,6 +10,14 @@ from stats.wikimedia import dec, replica
 
 admin_types = ("delete", "block", "protect", "merge", "import", "abusefilter")
 extra_groups = ("bureaucrat", "interface-admin", "checkuser", "suppress", "bot")
+
+# WMF, WMUK, WMDE... as a word, or (WMF) style brackets. those are staff or
+# chapter accounts with no edits, not the abuse filter
+staff_word = re.compile(r"\b(WM[A-Z]*|Wmf)\b")
+
+
+def looks_staff(name):
+    return "(" in name or ")" in name or bool(staff_word.search(name))
 
 
 def stamp(dt):
@@ -73,7 +82,8 @@ def fetch(dbname):
             "groups": groups,
             "bot": "bot" in groups,
             # sysop with no edits at all is almost always the abuse filter account ;)
-            "filter": not last_edit,
+            # but staff accounts often have none either, see looks_staff
+            "filter": not last_edit and not looks_staff(name),
             "role": team.get(name),
             "last_edit": to_iso(last_edit),
             "last_log": to_iso(last_log),

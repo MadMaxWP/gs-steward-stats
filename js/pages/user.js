@@ -1,9 +1,9 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { api } from '../api.js';
 import { CdxCheckbox, CdxIcon, CdxMessage, CdxSelect, CdxTab, CdxTable, CdxTabs, CdxTextInput, icons } from '../codex.js';
-import { ago, fillMonths, fmtDate, fmtTs, num, plural } from '../format.js';
-import { actionLabel, roleName } from '../logs.js';
-import { route, setQuery } from '../store.js';
+import { ago, fillMonths, fmtDate, fmtDay, fmtTs, monthsAgo, num, plural } from '../format.js';
+import { actionLabel, activity, roleName } from '../logs.js';
+import { route, setQuery, store } from '../store.js';
 import { ActionExplorer, ActionList } from '../components/actions.js';
 import { BarChart, Heatmap, RankBars } from '../components/charts.js';
 import { CacheBar, Pager, PinButton, StatCard } from '../components/common.js';
@@ -112,7 +112,50 @@ export const UserPage = {
     const grpName = g => (g === 'steward' ? 'Steward' : g === 'global-sysop' ? 'Global sysop' : g);
     const pstItems = [{ value: 'all', label: 'Current and past' }, { value: 'current', label: 'Current only' }, { value: 'past', label: 'Past only' }];
     const ptypeItems = [{ value: 'all', label: 'All projects' }, { value: 'gs', label: 'GS projects' }, { value: 'nongs', label: 'Non-GS projects' }];
-    const localRows = computed(() => (per.value ? per.value.local.filter(r => (pst.value === 'all' || (pst.value === 'current') === r.current) && (ptype.value === 'all' || (ptype.value === 'gs') === r.is_gs)) : []));
+    // one row per period, laid out like the global groups table
+    const localRows = computed(() => {
+      if (!per.value) return [];
+      const out = [];
+      for (const r of per.value.local) {
+        if (ptype.value !== 'all' && (ptype.value === 'gs') !== r.is_gs) continue;
+        r.periods.forEach((x, i) => {
+          const current = x.to === 'present';
+          if (pst.value !== 'all' && (pst.value === 'current') !== current) return;
+          out.push({ key: r.wiki + i, wiki: r.wiki, domain: r.domain, is_gs: r.is_gs, is_locked: r.is_locked, from: x.from, to: x.to, note: x.note, log: x.log, current });
+        });
+      }
+      return out;
+    });
+    const localWikis = computed(() => new Set(localRows.value.map(r => r.wiki)).size);
+
+    // the 6 month inactivity rule is for global sysops only
+    const since = () => d.value.summary.last_ts || d.value.role_since || d.value.first_granted;
+    const inactiveFrom = () => { const t = new Date(since()); t.setUTCMonth(t.getUTCMonth() + 6); return t; };
+    const lastHint = computed(() => {
+      const s = d.value && d.value.summary;
+      if (!s || !s.last_ts) return '';
+      let h = fmtTs(s.last_ts);
+      if (d.value.role === 'global-sysop' && new Date(s.last_ts) < monthsAgo(4)) {
+        const t = inactiveFrom();
+        h += (t <= new Date() ? ' · inactive since ' : ' · inactive from ') + fmtDay(t.toISOString());
+      }
+      return h;
+    });
+    // only on your own page
+    const myBox = computed(() => {
+      if (!d.value || !store.me || store.me.username !== d.value.name) return null;
+      const a = activity({ last_ts: d.value.summary.last_ts, role_since: d.value.role_since, first_granted: d.value.first_granted });
+      const where = d.value.role === 'steward' ? ' on a GS wiki' : '';
+      const last = d.value.summary.last_ts ? 'Last recorded action' + where + ' ' + ago(d.value.summary.last_ts) + '.'
+        : 'No recorded actions' + (where ? ' on GS wikis' : '') + ' yet.';
+      let note = '';
+      if (d.value.role === 'global-sysop' && since()) {
+        const day = fmtDay(inactiveFrom().toISOString());
+        if (a.key === 'inactive') note = 'Inactive since ' + day + '.';
+        else if (a.key === 'semi') note = "You'll count as inactive from " + day + ' if there are no more actions.';
+      }
+      return { a, text: note ? last + ' ' + note : last };
+    });
     const months = computed(() => (d.value ? fillMonths(d.value.monthly).slice(-36) : []));
     const heat = computed(() => {
       const g = Array.from({ length: 7 }, () => Array(24).fill(0));
@@ -135,7 +178,7 @@ export const UserPage = {
     const wikiCount = computed(() => (d.value ? d.value.by_wiki.filter(w => Number(w.lk) !== 1).length : 0));
     const wikiCols = [{ id: 'wiki', label: 'Project' }, { id: 'n', label: 'Actions', textAlign: 'number' }, { id: 'last_ts', label: 'Last action' }];
     const groupCols = [{ id: 'group', label: 'Group' }, { id: 'from', label: 'From' }, { id: 'to', label: 'To' }, { id: 'current', label: 'Status' }, { id: 'log', label: 'Log' }];
-    const localCols = [{ id: 'wiki', label: 'Project' }, { id: 'type', label: 'Type' }, { id: 'periods', label: 'Periods' }, { id: 'current', label: 'Status' }];
+    const localCols = [{ id: 'wiki', label: 'Project' }, { id: 'type', label: 'Type' }, { id: 'from', label: 'From' }, { id: 'to', label: 'To' }, { id: 'current', label: 'Status' }, { id: 'log', label: 'Log' }];
     const wsortItems = [{ value: 'n', label: 'Most actions' }, { value: 'last', label: 'Most recent' }, { value: 'name', label: 'Project name' }];
     const links = computed(() => {
       const n = encodeURIComponent(p.name.replace(/ /g, '_'));
@@ -151,7 +194,7 @@ export const UserPage = {
     });
     return {
       query, d, err, busy, load, tab, wq, wsort, per, perErr, perBusy, loadPeriods, pst, ptype, grpName, pstItems, ptypeItems, localRows,
-      months, heat, types, wikiRows, wikiCount, wikiCols, groupCols, localCols, wsortItems, links, roleName, icons, num, ago, fmtTs, fmtDate, plural
+      months, heat, types, wikiRows, wikiCount, localWikis, lastHint, myBox, wikiCols, groupCols, localCols, wsortItems, links, roleName, icons, num, ago, fmtTs, fmtDate, plural
     };
   },
   template: `
@@ -172,11 +215,15 @@ export const UserPage = {
         </div>
       </div>
     </div>
+    <section v-if="myBox" class="panel mybox">
+      <h2>Your activity</h2>
+      <p><gs-tag :status="myBox.a.chip">{{ myBox.a.label }}</gs-tag> {{ myBox.text }}</p>
+    </section>
     <div class="stats">
       <stat-card label="Total actions" :value="num(d.summary.total)" :icon="icons.check" tone="ok" :hint="'on ' + plural(wikiCount, 'project')"/>
       <stat-card label="Last 30 days" :value="num(d.summary.c30)" :icon="icons.calendar" tone="info" :hint="num(d.summary.c90) + ' in 90 days, ' + num(d.summary.c365) + ' in a year'"/>
-      <stat-card label="Last action" :value="ago(d.summary.last_ts)" :icon="icons.clock" tone="info" :hint="fmtTs(d.summary.last_ts)"/>
-      <stat-card label="Closed/Locked project actions" :value="num(d.summary.locked)" :icon="icons.lock" tone="warn" hint="Listed separately"/>
+      <stat-card label="Last action" :value="ago(d.summary.last_ts)" :icon="icons.clock" tone="info" :hint="lastHint"/>
+      <stat-card label="Closed/Locked project actions" :value="num(d.summary.locked)" :icon="icons.lock" tone="warn" hint="Not included in total actions"/>
     </div>
     <cdx-tabs v-model:active="tab" :framed="true">
       <cdx-tab name="actions" label="Actions"><div class="panel tabpanel"><action-explorer :user="d.name" :initial="query" sync/></div></cdx-tab>
@@ -206,17 +253,19 @@ export const UserPage = {
                 <template #item-from="{ item }"><span class="nw">{{ fmtDate(item) }}</span></template>
                 <template #item-to="{ item }"><span class="nw">{{ item === 'present' ? 'present' : fmtDate(item) }}</span></template>
                 <template #item-current="{ item }"><gs-tag :status="item ? 'success' : 'notice'">{{ item ? 'Current' : 'Past' }}</gs-tag></template>
-                <template #item-log="{ item }"><a v-if="item" class="nw" :href="'https://meta.wikimedia.org/wiki/' + item" target="_blank" rel="noopener"><cdx-icon :icon="icons.ext" size="small"/> Log</a></template>
+                <template #item-log="{ item }"><a v-if="item" :href="'https://meta.wikimedia.org/wiki/' + item" target="_blank" rel="noopener" aria-label="View log" v-tooltip="'View log'"><cdx-icon :icon="icons.ext" size="small"/></a></template>
               </cdx-table>
               <h2 class="mt">Local administrator rights</h2>
               <cdx-message type="notice" :allow-user-dismiss="false">Actions made on a project while this user was a local administrator there are not recorded.</cdx-message>
-              <div class="toolbar mt"><div class="grp"><cdx-select v-model:selected="pst" :menu-items="pstItems"/><cdx-select v-model:selected="ptype" :menu-items="ptypeItems"/></div><span class="muted">{{ localRows.length }} of {{ plural(per.local.length, 'project') }}</span></div>
+              <div class="toolbar mt"><div class="grp"><cdx-select v-model:selected="pst" :menu-items="pstItems"/><cdx-select v-model:selected="ptype" :menu-items="ptypeItems"/></div><span class="muted">{{ localWikis }} of {{ plural(per.local.length, 'project') }}</span></div>
               <div v-if="!localRows.length" class="empty">No projects match.</div>
               <cdx-table v-else caption="Local administrator rights" hide-caption :columns="localCols" :data="localRows">
                 <template #item-wiki="{ item }"><span class="nw mono">{{ item }}</span></template>
                 <template #item-type="{ row }"><span class="nw"><gs-tag :status="row.is_gs ? 'success' : 'notice'">{{ row.is_gs ? 'GS' : 'Non-GS' }}</gs-tag> <gs-tag v-if="row.is_locked" status="warning">Closed/Locked</gs-tag></span></template>
-                <template #item-periods="{ row }"><div v-for="(x, i) in row.periods" :key="i" class="nw">{{ fmtDate(x.from) }} to {{ x.to === 'present' ? 'present' : fmtDate(x.to) }}<span v-if="x.note" class="muted"> ({{ x.note }})</span> <a v-if="x.log && row.domain" :href="'https://' + row.domain + '/wiki/' + x.log" target="_blank" rel="noopener"><cdx-icon :icon="icons.ext" size="small"/> Log</a></div></template>
+                <template #item-from="{ item }"><span class="nw">{{ fmtDate(item) }}</span></template>
+                <template #item-to="{ row }"><span class="nw">{{ row.to === 'present' ? 'present' : fmtDate(row.to) }}</span><span v-if="row.note" class="muted small"> ({{ row.note }})</span></template>
                 <template #item-current="{ item }"><gs-tag :status="item ? 'success' : 'notice'">{{ item ? 'Current' : 'Past' }}</gs-tag></template>
+                <template #item-log="{ row }"><a v-if="row.log && row.domain" :href="'https://' + row.domain + '/wiki/' + row.log" target="_blank" rel="noopener" aria-label="View log" v-tooltip="'View log'"><cdx-icon :icon="icons.ext" size="small"/></a></template>
               </cdx-table>
             </template>
           </template>

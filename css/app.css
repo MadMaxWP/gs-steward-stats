@@ -130,6 +130,8 @@ main { flex: 1 0 auto; width: 100%; max-width: 1320px; margin: 0 auto; padding: 
 .tone-mute .cdx-card__icon { color: var(--color-subtle, #54595d); }
 
 /* user and project headers */
+.mybox h2 { font-size: 1rem; margin: 0 0 8px; }
+.mybox p { margin: 0; }
 .uhead { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
 .uhead .av { color: var(--color-subtle, #54595d); }
 .uhead h1 { font-size: 1.75rem; overflow-wrap: anywhere; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }

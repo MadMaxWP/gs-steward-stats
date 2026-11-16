@@ -5,41 +5,37 @@ export const AboutPage = {
   setup() { return { icons }; },
   template: `
 <div>
-  <div class="pagehead"><h1>About</h1><p class="sub">Here's a quick explanation of what this tool tracks and how the numbers work.</p></div>
+  <div class="pagehead"><h1>About</h1></div>
   <section class="panel about">
-    <h2><cdx-icon :icon="icons.info"/>What this tool shows</h2>
-    <p>This tool keeps track of administrative actions by current stewards and global sysops on global sysop projects. This includes deletions, undeletions, revision and log deletions, blocks, unblocks, protections, history merges, imports and AbuseFilter changes. Former stewards and global sysops aren't included.</p>
+    <p>gs-steward-stats tracks admin actions by current stewards and global sysops on global sysop wikis: deletions and undeletions, revision and log deletion, blocks, protections, history merges, imports and AbuseFilter changes.</p>
 
-    <h2><cdx-icon :icon="icons.contrib"/>What gets counted</h2>
-    <p>An action only counts if the user had the steward or global sysop right when they performed it. Actions on projects where they were also a local admin at the time aren't counted. Closed and locked projects are shown separately and aren't included in the main totals.</p>
+    <h2><cdx-icon :icon="icons.contrib"/>Counting</h2>
+    <p>An action is counted only if the user held steward or global sysop rights at the time. Actions on a wiki where the user was also a local admin are excluded. Closed wikis are listed separately and are not part of the main totals. Former stewards and global sysops are not tracked.</p>
 
-    <h2><cdx-icon :icon="icons.userActive"/>Activity levels</h2>
-    <p>Activity is based on when a user last performed an action recorded by this tool, including actions on closed and locked projects.</p>
+    <h2><cdx-icon :icon="icons.userActive"/>Activity</h2>
+    <p>Based on the date of a user's most recent counted action, including closed wikis.</p>
     <ul>
-      <li><b>Active:</b> At least one action in the last month.</li>
-      <li><b>Moderate:</b> No action in the last month, but one within the last two months.</li>
-      <li><b>Low activity:</b> No action in the last two months, but one within the last six months.</li>
-      <li><b>Inactive:</b> No recorded action in the last six months or longer.</li>
+      <li><b>Active</b>: within the last month</li>
+      <li><b>Moderate</b>: 1 to 2 months ago</li>
+      <li><b>Low activity</b>: 2 to 6 months ago</li>
+      <li><b>Inactive</b>: more than 6 months ago</li>
     </ul>
-    <p>This doesn't cover everything stewards do. Things like global locks, suppressions and renames aren't included in these activity figures, so someone marked as inactive here may still be active in other areas.</p>
+    <p>Global locks, suppression and renames are not included in activity, so a steward shown as inactive on GS wikis may still be active in other steward work.</p>
 
     <h2><cdx-icon :icon="icons.live"/>Live feed</h2>
-    <p>The live feed shows actions as they happen, including steward only logs from Meta such as rights changes, global blocks, global locks and renames, and edits by stewards on the steward request pages.</p>
+    <p>Shows actions from the Wikimedia event stream as they happen. On Meta it also includes steward logs (rights, global blocks, locks, renames) and steward edits on the request pages.</p>
 
-    <h2><cdx-icon :icon="icons.star"/>Pinned users</h2>
-    <p>You can use the star button to pin users and keep them handy. Pinned users appear on the overview and in the users list. Your pins are saved in your browser.</p>
+    <h2><cdx-icon :icon="icons.star"/>Pins</h2>
+    <p>Starred users are pinned to the top of the overview and users list. Pins are stored in your browser only.</p>
 
     <h2><cdx-icon :icon="icons.group"/>People</h2>
-    <p>The People page shows who has recently visited the tool, who's online and when others were last here.</p>
-    <p>Only your username and roughly when you last visited are stored, rounded to the nearest minute. You're removed from the list after 30 days without a visit.</p>
+    <p>Lists users who have logged in recently. Only the username and last visit time (to the minute) are stored, and entries are removed after 30 days.</p>
 
-    <h2><cdx-icon :icon="icons.refresh"/>Where the data comes from</h2>
-    <p>Action history comes from the Wikimedia replica databases and is stored in the ToolsDB database. New actions are added from the live event stream, and a full sync from the replicas runs every three hours to fill any gaps.</p>
-    <p>Steward and global sysop group history, along with local admin periods, comes from the GlobalSysopStats config and the APIs.</p>
+    <h2><cdx-icon :icon="icons.refresh"/>Data</h2>
+    <p>Action history is read from the Wiki Replicas and stored in ToolsDB. New actions are saved from the event stream within seconds, and a full sync with the replicas runs every 3 hours. Rights history and local admin periods come from the GlobalSysopStats config.</p>
 
-    <h2><cdx-icon :icon="icons.warn"/>Accuracy</h2>
-    <p>The numbers should be right for most actions, but there are a few limitations. Some closed or locked projects aren't available through the replicas, suppressed log entries can't be seen, and actions performed right around the start or end of a rights period may sometimes be counted differently.</p>
-    <p>You can check individual actions by opening the corresponding log entry using the link icon.</p>
+    <h2><cdx-icon :icon="icons.info"/>Notes</h2>
+    <p>Counts are reliable for nearly all actions. Some closed wikis are not available on the replicas and are not queried, and actions performed right around the start or end of a rights period may sometimes be counted differently, so counts may differ very slightly. Every action links to its log entry so it can be verified.</p>
 
     <div class="aboutbtns">
       <a class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--action-progressive cdx-button--weight-normal cdx-button--size-medium" href="https://meta.wikimedia.org/wiki/User:DreamRimmer_bot/GlobalSysopStats/user-config.json" target="_blank" rel="noopener"><cdx-icon :icon="icons.ext"/> Source config (JSON)</a>

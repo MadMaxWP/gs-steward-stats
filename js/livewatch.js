@@ -77,7 +77,32 @@ export const markSeen = () => { lsSet('gs-live-seen', String(Date.now())); unsee
 let since = Number(lsGet('gs-live-seen', '0')), first = true, started = false;
 const known = new Set();
 
+// browsers slow down timers in background tabs, after a few minutes to once a
+// minute. a tiny worker keeps its own pace, so its ticks drive the checks.
+// no worker (old browser) means a normal timer
+export function every(ms, fn) {
+  let w = null, t = null;
+  try {
+    const src = 'let t;onmessage=e=>{clearInterval(t);if(e.data)t=setInterval(()=>postMessage(0),e.data)}';
+    w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    w.onmessage = () => fn();
+    w.postMessage(ms);
+  } catch (e) {
+    w = null;
+    t = setInterval(fn, ms);
+  }
+  return {
+    set(n) { if (w) w.postMessage(n); else { clearInterval(t); t = setInterval(fn, n); } },
+    stop() { if (w) w.terminate(); clearInterval(t); }
+  };
+}
+
+const fast = 5000, slow = 10000;
+let busy = false, ticker = null;
+
 async function poll() {
+  if (busy) return;
+  busy = true;
   try {
     const d = await api('live', { since });
     const onLive = route.value.name === 'live';
@@ -85,7 +110,7 @@ async function poll() {
     const f = liveFilters();
     const seenAt = Number(lsGet('gs-live-seen', '0'));
     if (!onLive) {
-      // count from the full list on the first answer, then just add the new ones
+      // count from the first answer, then just add the new ones. the first never alerts
       const fresh = d.events.filter(e => !known.has(e.key) && e.recv > seenAt && matchesFilters(e, f));
       unseen.value = first ? fresh.length : unseen.value + fresh.length;
       if (!first) alertFor(fresh);
@@ -94,8 +119,10 @@ async function poll() {
     // a little overlap so nothing slips between two answers, the set drops repeats
     since = Math.max(0, d.now - 20000);
     first = false;
-  } catch (e) {}
-  setTimeout(poll, document.hidden ? 30000 : 15000);
+  } catch (e) {
+  } finally {
+    busy = false;
+  }
 }
 
 export function startWatch() {
@@ -107,4 +134,9 @@ export function startWatch() {
     document.addEventListener('click', startAudio, { once: true });
   }
   poll();
+  ticker = every(document.hidden ? slow : fast, poll);
+  document.addEventListener('visibilitychange', () => {
+    ticker.set(document.hidden ? slow : fast);
+    if (!document.hidden) poll();
+  });
 }

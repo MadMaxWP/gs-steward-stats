@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from stats import db, rights, settings, stewards, sync
+from stats import cache, db, rights, settings, stewards, sync
 from stats.logparams import normalize
 from stats.wikimedia import fetch_config, fetch_gs_wikis, fetch_members, fetch_private
 
@@ -19,8 +19,9 @@ from stats.wikimedia import fetch_config, fetch_gs_wikis, fetch_members, fetch_p
 # in memory for the live feed page, and hands admin actions to the saver so they
 # go into gs_actions and the summary within a few seconds.
 #
-# the website asks the listener for the feed over the tool's internal network,
-# see feed() at the bottom.
+# the listener puts the feed in redis and the website reads it from there. if
+# redis isn't there it asks the listener over the tool's internal network, see
+# feed() at the bottom.
 #
 # the place in the stream is kept in gs_meta (live_cursor) once a batch is saved,
 # so a restart or a deploy carries on from there and nothing is missed
@@ -33,6 +34,10 @@ admin_types = {"delete", "block", "protect", "merge", "import", "abusefilter"}
 
 keep_events = 500
 keep_seconds = 3 * 3600   # same as the update job, older actions are on the other pages by then
+feed_key = ("feed",)
+publish_every = 2         # the feed goes to redis this often when something changed
+heartbeat = 10            # ...and at least this often anyway, so the website knows it's alive
+stale_after = 45          # a copy in redis older than this means the listener is gone
 resume_max = 3 * 3600     # pick the stream up from the saved place if it's this recent
 refresh_every = 30 * 60   # reload who is a steward/gs and which wikis count
 retry_every = 60          # ...or this soon if that failed
@@ -83,6 +88,7 @@ class Listener:
         self.last_seen = time.time()
         self.response = None
         self.counts = {"events": 0, "shown": 0, "queued": 0, "reconnects": 0}
+        self.changed = True
         self.load_cursor()
 
     # ---- where we were in the stream
@@ -194,6 +200,7 @@ class Listener:
             ok = False
         threading.Thread(target=self.refresher, args=(ok,), name="live-refresh", daemon=True).start()
         threading.Thread(target=self.watchdog, name="live-watchdog", daemon=True).start()
+        threading.Thread(target=self.publisher, name="live-publish", daemon=True).start()
         while not self.stop.is_set():
             try:
                 self.listen()
@@ -332,6 +339,18 @@ class Listener:
             self.status["total_seen"] += 1
             self.status["last_event_ms"] = row["recv"]
             self.counts["shown"] += 1
+            self.changed = True
+
+    def publisher(self):
+        # puts the feed in redis for the website. nothing new means it only goes
+        # out as a heartbeat, so the website can tell the listener is still there
+        last, was_connected = 0, None
+        while not self.stop.wait(publish_every):
+            connected = self.status["connected"]
+            if not (self.changed or connected != was_connected or time.time() - last >= heartbeat):
+                continue
+            self.changed, was_connected, last = False, connected, time.time()
+            cache.put(feed_key, self.feed(), 3600)
 
     def feed(self):
         cutoff = now_ms() - keep_seconds * 1000
@@ -350,17 +369,21 @@ web_cache = 2  # seconds, every open tab polls, the listener is only asked this 
 
 
 def feed(since):
+    # from redis, where the listener keeps it. if redis has nothing fresh (redis
+    # down, or no prefix set) ask the listener directly instead
     with _web_lock:
         if time.time() - _web["at"] >= web_cache:
-            try:
-                r = requests.get(settings.listener_url + "/feed", timeout=5)
-                r.raise_for_status()
-                _web["data"] = r.json()
-            except Exception:
-                # listener restarting or down, keep the last copy but show it as disconnected
-                old = _web["data"] or {"events": [], "status": {}}
-                _web["data"] = {**old, "status": {**old.get("status", {}), "connected": False}}
-            _web["at"] = time.time()
+            data = cache.get(feed_key)
+            if not data or now_ms() - data.get("now", 0) > stale_after * 1000:
+                try:
+                    r = requests.get(settings.listener_url + "/feed", timeout=5)
+                    r.raise_for_status()
+                    data = r.json()
+                except Exception:
+                    # listener restarting or down, keep the last copy but show it as disconnected
+                    old = _web["data"] or {"events": [], "status": {}}
+                    data = {**old, "status": {**old.get("status", {}), "connected": False}}
+            _web["data"], _web["at"] = data, time.time()
         data = _web["data"]
     events = [e for e in data.get("events", []) if e.get("recv", 0) > since]
     return {"events": events, "status": data.get("status") or {"connected": False}, "now": now_ms()}

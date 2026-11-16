@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import pymysql
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
-from stats import auth, db, live, localadmins, people, pool, queries, rights
+from stats import auth, db, gsaccess, live, localadmins, people, pool, queries, rights
 from stats.cache import cached
 from stats.wikimedia import fetch_config
 
@@ -133,6 +133,14 @@ def project_admins(dbname):
         return jsonify({"error": "Unknown project"}), 404
     data, ts = cached(("admins", dbname), 1800, lambda: localadmins.fetch(dbname), force())
     return jsonify({**data, "cached_at": stamp(ts)})
+
+
+@bp.route("/project/<dbname>/gs-access")
+def project_gs_access(dbname):
+    # the wiki set log is small and changes rarely, one read covers every wiki
+    data, ts = cached(("gsaccess",), 6 * 3600, gsaccess.fetch, force())
+    events = data["wikis"].get(dbname, [])
+    return jsonify({"events": events, "opted_out": dbname in data["opted_out"], "cached_at": stamp(ts)})
 
 
 @bp.route("/actions")

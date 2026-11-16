@@ -111,22 +111,25 @@ export const LocalAdmins = {
       { label: 'Local admins', value: d.value.summary.admin90 },
       { label: 'Stewards and global sysops', value: p.gs90 || 0 }
     ] : []));
-    // only mention bots and the abuse filter account when the wiki has them
+    // hover text on the local admins card, only when the wiki has a bot or abuse filter account
     const extras = computed(() => {
       if (!d.value) return '';
-      const s = d.value.summary, bits = [];
-      if (s.bots) bits.push(plural(s.bots, 'admin bot'));
-      if (s.filter) bits.push(plural(s.filter, 'abuse filter account'));
-      return bits.length ? 'plus ' + bits.join(' and ') : '';
+      const s = d.value.summary;
+      const one = (n, what) => (n === 1 ? what : num(n) + ' ' + what);
+      if (s.bots && s.filter) {
+        return one(s.bots, s.bots === 1 ? 'Admin bot' : 'admin bot accounts') + ' and ' + one(s.filter, s.filter === 1 ? 'abuse filter account' : 'abuse filter accounts') + ' are left out.';
+      }
+      if (s.bots) return s.bots === 1 ? 'Admin bot account is left out.' : num(s.bots) + ' admin bot accounts are left out.';
+      if (s.filter) return s.filter === 1 ? 'Abuse filter account is left out.' : num(s.filter) + ' abuse filter accounts are left out.';
+      return '';
     });
     const adminLine = computed(() => {
       if (!d.value) return '';
       const s = d.value.summary;
-      if (!s.admins) return 'This wiki has no local admins' + (s.bots || s.filter ? ', only ' + extras.value.replace('plus ', '') : '') + '.';
+      if (!s.admins) return 'This wiki has no local admins.';
       const who = s.admins === 1 ? (s.logged60 ? 'with a' : 'with no')
         : (!s.logged60 ? 'none with a' : s.logged60 === s.admins ? 'all with a' : num(s.logged60) + ' with a');
-      return plural(s.admins, 'local admin') + ', ' + who + ' logged action in the last 2 months.'
-        + (s.bots || s.filter ? ' Admin bots and abuse filter accounts are left out.' : '');
+      return plural(s.admins, 'local admin') + ', ' + who + ' logged action in the last 2 months.';
     });
     const userLink = n => 'https://' + p.domain + '/wiki/User:' + encodeURIComponent(n.replace(/ /g, '_'));
     const caLink = n => 'https://meta.wikimedia.org/wiki/Special:CentralAuth/' + encodeURIComponent(n);
@@ -140,7 +143,7 @@ export const LocalAdmins = {
   <template v-else>
     <cache-bar :at="d.cached_at" :busy="busy" @refresh="load(true)"/>
     <div class="stats">
-      <stat-card label="Local admins" :value="num(d.summary.admins)" :icon="icons.group" :hint="extras"/>
+      <stat-card label="Local admins" :value="num(d.summary.admins)" :icon="icons.group" v-tooltip="extras || null"/>
       <stat-card label="Active in the last 7 days" :value="num(d.summary.active7)" :icon="icons.userActive" :hint="num(d.summary.active30) + ' in 30 days, ' + num(d.summary.active90) + ' in 90 days'"/>
       <stat-card label="Admin actions by locals (30 d)" :value="num(d.summary.admin30)" :icon="icons.check" :hint="'stewards and global sysops: ' + num(gs30)"/>
       <stat-card v-if="d.summary.edits30 != null" label="Edits on the wiki (30 d)" :value="num(d.summary.edits30)" :icon="icons.contrib" :hint="'by ' + plural(d.summary.editors30, 'editor') + ', bots left out'"/>

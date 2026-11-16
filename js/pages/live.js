@@ -49,7 +49,7 @@ export const LivePage = {
         }
         if (d.events.length) {
           items.value.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
-          if (items.value.length > 500) items.value.length = 500;
+          if (items.value.length > 2000) items.value.length = 2000;
         }
         // the first answer is history, only later ones can alert
         alertFor(fresh.filter(matches));
